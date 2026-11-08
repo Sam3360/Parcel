@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://parcel.invalid/schemas/references-1.0.json",
+  "title": "metadata/references.json",
+  "description": "A convenience mirror of manifest.references for tools that do not parse the manifest. The manifest is authoritative.",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": ["id", "title", "url"],
+    "properties": {
+      "id": { "type": "string" }, "title": { "type": "string" }, "url": { "type": "string" },
+      "description": { "type": "string" }, "category": { "type": "string" }, "entry_id": { "type": "string" }
+    }
+  }
+}

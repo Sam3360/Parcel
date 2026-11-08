@@ -1,0 +1,24 @@
+[package]
+name = "parcel-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Parcel desktop application (Tauri 2)"
+
+[lib]
+name = "parcel_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+parcel-core = { workspace = true }
+parcel-workspace = { path = "../../crates/parcel-workspace" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+uuid = { version = "1", features = ["v4"] }

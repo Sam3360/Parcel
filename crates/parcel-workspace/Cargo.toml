@@ -1,0 +1,19 @@
+[package]
+name = "parcel-workspace"
+description = "Parcel workspace layer: SQLite persistence, collection, export/import orchestration. No Tauri dependency."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+parcel-core = { workspace = true }
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", default-features = false, features = ["serde", "clock", "std"] }
+thiserror = "2"
+
+[dev-dependencies]
+tempfile = "3"
+zip = { version = "2", default-features = false, features = ["deflate"] }
