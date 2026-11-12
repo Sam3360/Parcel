@@ -24,10 +24,15 @@ export type Route =
   | { page: 'settings' };
 
 type Tone = 'info' | 'success' | 'error' | 'warn';
+interface ToastAction {
+  label: string;
+  onClick: () => void;
+}
 interface Toast {
   id: number;
   msg: string;
   tone: Tone;
+  action?: ToastAction;
 }
 interface ConfirmOpts {
   title: string;
@@ -49,7 +54,7 @@ export interface AppCtx {
   setPref: (k: string, v: string) => Promise<void>;
   route: Route;
   navigate: (r: Route) => void;
-  toast: (msg: string, tone?: Tone) => void;
+  toast: (msg: string, tone?: Tone, action?: ToastAction) => void;
   reportError: (e: unknown, context?: string) => void;
   confirm: (o: ConfirmOpts) => Promise<boolean>;
   prompt: (o: PromptOpts) => Promise<string | null>;
@@ -111,10 +116,14 @@ export function AppProvider({
     return () => mq.removeEventListener?.('change', h);
   }, [prefs]);
 
-  const toast = useCallback((msg: string, tone: Tone = 'info') => {
+  const toast = useCallback((msg: string, tone: Tone = 'info', action?: ToastAction) => {
     const id = ++seq.current;
-    setToasts((t) => [...t, { id, msg, tone }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), tone === 'error' ? 9000 : 4500);
+    setToasts((t) => [...t, { id, msg, tone, action }]);
+    // Toasts with an action stay a little longer so there is time to use it.
+    setTimeout(
+      () => setToasts((t) => t.filter((x) => x.id !== id)),
+      tone === 'error' ? 9000 : action ? 8000 : 4500,
+    );
   }, []);
   const reportError = useCallback(
     (e: unknown, context?: string) => {
@@ -229,6 +238,18 @@ export function AppProvider({
         {toasts.map((t) => (
           <div key={t.id} className={`toast ${t.tone}`} role={t.tone === 'error' ? 'alert' : 'status'}>
             <div className="grow">{t.msg}</div>
+            {t.action && (
+              <button
+                className="btn"
+                style={{ height: 24 }}
+                onClick={() => {
+                  t.action?.onClick();
+                  setToasts((x) => x.filter((y) => y.id !== t.id));
+                }}
+              >
+                {t.action.label}
+              </button>
+            )}
             <button
               className="btn icon ghost"
               style={{ height: 22, width: 22 }}

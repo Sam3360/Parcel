@@ -8,6 +8,8 @@ use parcel_core::manifest::{EntryKind, Manifest};
 use parcel_core::reader::{ConflictPolicy, ExtractOptions, ExtractReport, IntegrityReport, PackageReader};
 use parcel_core::writer::ExportOptions;
 use parcel_workspace::collect::scan_paths;
+use parcel_workspace::import::StagedImport;
+use parcel_workspace::launch::strip_verbatim_prefix;
 use parcel_workspace::models::*;
 use parcel_workspace::ops::{AddReport, ExportOutcome, ExportRequest, SourceCheck};
 use parcel_workspace::templates::{ExportProfile, ProfileSpec, Template, TemplateSpec};
@@ -73,7 +75,17 @@ pub fn restore_workspace(s: St, id: String) -> IpcResult<()> {
 }
 #[tauri::command]
 pub fn purge_workspace(s: St, id: String) -> IpcResult<()> {
-    with_store(&s, |st| st.purge_workspace(&id))
+    with_store(&s, |st| st.purge_workspace(&id))?;
+    cleanup_managed(&s);
+    Ok(())
+}
+
+/// Remove imported-file folders nothing references any more (never ones for imports in progress).
+pub fn cleanup_managed(s: &AppState) {
+    let protected = s.protected_import_ids();
+    if let Ok(g) = s.store.lock() {
+        let _ = g.cleanup_managed_dirs(&s.managed_dir(), &protected);
+    }
 }
 
 // ---------------- entries ----------------
@@ -262,13 +274,8 @@ pub fn find_duplicates(s: St, workspaceId: String) -> IpcResult<Vec<parcel_core:
 #[tauri::command]
 #[allow(non_snake_case)]
 pub fn workspace_diagnostics(s: St, workspaceId: String) -> IpcResult<Vec<Diagnostic>> {
-    // Build the same manifest an export would, without writing anything.
-    let req = ExportRequest { dest: PathBuf::from("/unused"), accept_changed: true, ..Default::default() };
-    let prep = with_store(&s, |st| st.prepare_export(&workspaceId, &req));
-    match prep {
-        Ok(p) => Ok(diagnose_dependencies(&p.input.base)),
-        Err(e) => Err(e),
-    }
+    // Static analysis only: must keep working when source files are missing or changed.
+    with_store(&s, |st| st.diagnose_dependencies(&workspaceId))
 }
 
 // ---------------- export / import ----------------
@@ -304,6 +311,7 @@ pub async fn export_workspace(
         .map_err(|e| IpcError::invalid(e.to_string()))?;
     s.finish_job(&jobId);
     let report = report?;
+    s.remember_path(report.path.clone());
     with_store(&s, |st| st.finish_export(&prep, &report))
 }
 
@@ -316,14 +324,32 @@ pub async fn import_package(app: AppHandle, s: St<'_>, path: String, jobId: Stri
     let cancel = s.register_job(&jobId);
     let em = emitter(app, jobId.clone());
     let store = s.store.clone();
-    let res = tauri::async_runtime::spawn_blocking(move || {
-        let mut g = store.lock().map_err(|_| IpcError::invalid("lock poisoned"))?;
-        g.import_package(&path, &managed, &limits, &cancel, &em).map_err(IpcError::from)
+    let ws_id = uuid::Uuid::new_v4().to_string();
+    // Protect the import's folder from cleanup for as long as it is being staged or committed.
+    s.staging.lock().unwrap().insert(ws_id.clone());
+    let id_for_task = ws_id.clone();
+    let res = tauri::async_runtime::spawn_blocking(move || -> Result<Workspace, parcel_workspace::WsError> {
+        // Phase 1: extract + verify with NO database lock held; cleans up after itself on failure/cancel.
+        let staged = StagedImport::prepare(&path, &managed, &id_for_task, &limits, &cancel, &em)?;
+        if let Err(e) = cancel.check() {
+            staged.discard();
+            return Err(e.into());
+        }
+        // Phase 2: one short, atomic transaction.
+        let mut g = store.lock().map_err(|_| parcel_workspace::WsError::Invalid("internal lock poisoned".into()))?;
+        g.commit_import(&staged).inspect_err(|_| staged.discard())
     })
-    .await
-    .map_err(|e| IpcError::invalid(e.to_string()))?;
+    .await;
+    s.staging.lock().unwrap().remove(&ws_id);
     s.finish_job(&jobId);
-    res
+    match res {
+        Ok(r) => Ok(r?),
+        Err(join_err) => {
+            // The task panicked: make sure no orphaned folder is left behind.
+            cleanup_managed(&s);
+            Err(IpcError::invalid(join_err.to_string()))
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -356,6 +382,7 @@ pub async fn convert_zip(
             .map_err(|e| IpcError::invalid(e.to_string()))?;
     s.finish_job(&jobId);
     let r = res?;
+    s.remember_path(r.build.path.clone());
     with_store(&s, |st| st.add_recent_package(&r.build.path.to_string_lossy(), &r.build.manifest.name, r.build.package_size as i64))?;
     Ok(ZipImportResult {
         path: r.build.path.to_string_lossy().into(),
@@ -379,6 +406,7 @@ pub struct PackageInfo {
 pub fn open_package(s: St, path: String) -> IpcResult<PackageInfo> {
     let p = abs(&path)?;
     let mut r = PackageReader::open(&p, &s.limits())?;
+    s.remember_path(p.clone());
     let notes = r.notes()?;
     let m = r.manifest().clone();
     let size = r.file_size();
@@ -425,6 +453,7 @@ pub async fn extract_package(
     jobId: String,
 ) -> IpcResult<ExtractReport> {
     let (p, d) = (abs(&path)?, abs(&dest)?);
+    let dest_for_reveal = d.clone();
     let limits = s.limits();
     let cancel = s.register_job(&jobId);
     let em = emitter(app, jobId.clone());
@@ -436,6 +465,7 @@ pub async fn extract_package(
     .map_err(|e| IpcError::invalid(e.to_string()))?;
     s.finish_job(&jobId);
     let rep = res?;
+    s.remember_path(dest_for_reveal);
     with_store(&s, |st| {
         st.log(None, "package.extracted", &format!("Extracted {} file(s) from {}", rep.written.len(), path), serde_json::Value::Null);
         Ok(())
@@ -606,6 +636,51 @@ pub fn save_profile(s: St, id: Option<String>, name: String, description: String
 #[tauri::command]
 pub fn delete_profile(s: St, id: String) -> IpcResult<()> {
     with_store(&s, |st| st.delete_profile(&id))
+}
+
+// ---------------- opening packages from outside / file manager ----------------
+/// Hand the UI any package paths passed on the command line or by a second instance (drains the queue).
+#[tauri::command]
+pub fn take_launch_packages(s: St) -> Vec<String> {
+    std::mem::take(&mut *s.pending_open.lock().unwrap())
+}
+
+fn reveal(app: &AppHandle, p: &Path) -> IpcResult<()> {
+    use tauri_plugin_opener::OpenerExt;
+    let p = strip_verbatim_prefix(p);
+    let kind = std::fs::symlink_metadata(&p).ok();
+    let err = |e: tauri_plugin_opener::Error| IpcError::invalid(e.to_string());
+    match kind {
+        Some(m) if m.is_file() => app.opener().reveal_item_in_dir(&p).map_err(err),
+        Some(m) if m.is_dir() => app.opener().open_path(p.to_string_lossy(), None::<&str>).map_err(err),
+        _ => match p.parent() {
+            // The file is gone: show the folder it used to live in, if that still exists.
+            Some(dir) if dir.is_dir() => app.opener().open_path(dir.to_string_lossy(), None::<&str>).map_err(err),
+            _ => Err(IpcError::invalid("that location no longer exists")),
+        },
+    }
+}
+
+/// Show a collected file's recorded source location in the file manager. The path comes from the database,
+/// never from the caller.
+#[tauri::command]
+#[allow(non_snake_case)]
+pub fn reveal_source(app: AppHandle, s: St, entryId: String) -> IpcResult<()> {
+    let e = with_store(&s, |st| st.get_entry(&entryId))?;
+    match (e.kind.as_str(), e.source_path) {
+        ("file", Some(sp)) => reveal(&app, Path::new(&sp)),
+        _ => Err(IpcError::invalid("this item has no source file")),
+    }
+}
+
+/// Show a package/folder that this app just created or opened. Arbitrary paths are refused.
+#[tauri::command]
+pub fn reveal_output(app: AppHandle, s: St, path: String) -> IpcResult<()> {
+    let p = abs(&path)?;
+    if !s.is_known_path(&p) {
+        return Err(IpcError::invalid("only locations created or opened by Parcel can be shown"));
+    }
+    reveal(&app, &p)
 }
 
 // ---------------- activity / recents / settings / jobs ----------------

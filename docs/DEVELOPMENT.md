@@ -14,6 +14,8 @@ cargo fmt --all
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test -p parcel-core -p parcel-workspace -p parcel-cli
 cargo check -p parcel-app                # Tauri crate
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
 
 # Frontend (from app/)
 npm run format       # write
@@ -45,5 +47,8 @@ cargo run -p parcel-workspace --example make_examples -- examples
 | New screen | `app/src/pages` or `app/src/features`, with a test using `renderApp` from `src/test/helpers.tsx` |
 
 ## Testing notes
+
+Virtualisation tests (`src/virtual.test.tsx`) emulate layout in jsdom (scroll container height, the table body moving with `scrollTop`); they exercise the windowing arithmetic but not real browser layout. Verify scrolling on a real build when changing `lib/virtual.tsx`.
+
 
 Frontend tests run against `createMockApi()`, a stateful in-memory implementation of the `Api` contract. It mirrors backend validation closely but is not the backend; contract drift is limited by typing both sides from the same interface. End-to-end tests of the real Tauri shell are not included.

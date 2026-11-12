@@ -92,19 +92,18 @@ describe('adding and removing entries', () => {
   });
 
   it('adds dropped files into the current folder', async () => {
-    let drop: (p: string[]) => void = () => {};
-    const { state } = open(
-      { entries: [] },
-      {
-        onFileDrop: (cb: (p: string[]) => void) => {
-          drop = cb;
-          return () => {};
-        },
-      },
-    );
+    const { state } = open({ entries: [] });
     await screen.findByText('Add your first items');
-    drop(['/x/dropped.txt']);
+    state.dropHandlers.forEach((h) => h(['/x/dropped.txt']));
     await waitFor(() => expect(state.entries.map((e) => e.name)).toEqual(['dropped.txt']));
+  });
+
+  it('does not treat a dropped .parcel as an "open package" request inside a workspace', async () => {
+    const { state } = open({ entries: [] });
+    await screen.findByText('Add your first items');
+    state.dropHandlers.forEach((h) => h(['/x/Other.parcel']));
+    await waitFor(() => expect(state.entries.map((e) => e.name)).toEqual(['Other.parcel']));
+    expect(screen.getByRole('toolbar', { name: 'Workspace tools' })).toBeInTheDocument();
   });
 
   it('reports files that were already collected instead of duplicating them', async () => {
@@ -400,7 +399,8 @@ describe('inspector, metadata and descriptions', () => {
     const { user, state } = open({ entries: [file('a.txt'), file('b.txt')] });
     await user.click(await row('a.txt'));
     const insp = await screen.findByLabelText('Inspector', { selector: 'div' });
-    await user.selectOptions(within(insp).getByLabelText('Dependency target'), state.entries[1].id);
+    await user.click(within(insp).getByRole('button', { name: 'Dependency target' }));
+    await user.click(await screen.findByRole('option', { name: 'b.txt' }));
     await user.click(within(insp).getByRole('button', { name: 'Add dependency' }));
     await waitFor(() => expect(state.deps).toHaveLength(1));
     expect(state.deps[0].from_entry).toBe(state.entries[0].id);

@@ -42,6 +42,9 @@ export const tauriApi: Api = {
     j('add_dependency', { workspaceId, fromEntry, kind, target, description, required }),
   deleteDependency: (id) => j('delete_dependency', { id }),
   openExternal: (url) => j('open_external', { url }),
+  takeLaunchPackages: () => j('take_launch_packages'),
+  revealSource: (entryId) => j('reveal_source', { entryId }),
+  revealOutput: (path) => j('reveal_output', { path }),
   addPaths: (workspaceId, parentId, paths, jobId) => j('add_paths', { workspaceId, parentId, paths, jobId }),
   checkSources: (workspaceId, deep, jobId) => j('check_sources', { workspaceId, deep, jobId }),
   relinkSource: (entryId, newPath, acceptDifferent) =>
@@ -141,6 +144,18 @@ export const tauriApi: Api = {
     let un: (() => void) | undefined;
     let cancelled = false;
     listen<Progress>('parcel://progress', (e) => cb(e.payload)).then((u) => {
+      if (cancelled) u();
+      else un = u;
+    });
+    return () => {
+      cancelled = true;
+      un?.();
+    };
+  },
+  onOpenPackage: (cb) => {
+    let un: (() => void) | undefined;
+    let cancelled = false;
+    listen('parcel://open-package', () => cb()).then((u) => {
       if (cancelled) u();
       else un = u;
     });

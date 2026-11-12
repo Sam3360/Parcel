@@ -28,9 +28,20 @@ Out of scope for 1.x: authenticity of packages (no signatures), confidentiality 
 | Tauri attack surface | Capabilities grant only core events, window title, and file dialogs; no shell, fs, http or opener permissions are exposed to the webview. All file access goes through typed commands that require absolute paths. CSP: `default-src 'self'`, no remote scripts, `connect-src` limited to IPC. |
 | Source files | Opened read-only; export checks size/timestamp (and hash when needed) first and refuses to proceed if a source is missing or changed unless the user explicitly accepts. A source modified *during* export is reported afterwards. |
 
+## Added in 1.1.0
+
+| Threat | Control |
+|---|---|
+| Crafted command line / second launch makes Parcel touch arbitrary paths | Only existing regular files ending in `.parcel` are accepted from arguments; they are merely *opened as packages* through the normal hostile-input checks. |
+| Revealing arbitrary paths via the UI bridge | `reveal_source` takes an entry id and uses the path stored in the database; `reveal_output` only accepts locations the app created or opened this session. Revealing never executes anything (files are selected in the file manager; folders are opened). |
+| Half-imported workspaces and orphaned extracted files | Import is stage-then-commit: workspace creation is one transaction and failed/cancelled imports delete their extracted folder. |
+| Deleting files still in use | Cleanup only removes UUID-named folders that no workspace or entry references (substring match on the UUID, so path-format differences keep data), skips symlinks and in-flight imports. Covered by tests including duplicate workspaces. |
+| Partial collection after a failed add | Adding to a workspace is a single transaction. |
+
 ## Known gaps
 
 * No package signing or encryption.
 * The fast source check trusts size + modification time; use *Deep check* to re-hash.
 * Reading a file that is being modified concurrently can produce a package containing the newer bytes; the user is warned after export.
-* The Windows build has not been exercised by the maintainers of this snapshot; Windows-specific filesystem edge cases (junctions, 8.3 names, alternate data streams) are not specifically tested.
+* Windows-specific filesystem edge cases (junctions, 8.3 names, alternate data streams) are not specifically tested. 1.1.0's Windows-dependent behaviour (file association launch, single-instance forwarding, revealing files in Explorer) has been tested on Linux only until validated on a Windows build.
+* Removing individual items from an imported workspace does not delete their stored files until the whole workspace is purged.

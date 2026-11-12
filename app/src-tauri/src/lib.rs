@@ -2,13 +2,28 @@ mod commands;
 mod error;
 mod state;
 
+use parcel_workspace::launch::package_paths_from_args;
 use parcel_workspace::Store;
 use state::AppState;
 use std::sync::{Arc, Mutex};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 pub fn run() {
     tauri::Builder::default()
+        // Must be registered first: a second launch (e.g. double-clicking another .parcel) is forwarded here
+        // and then exits, so the existing window opens the package instead of a second app starting.
+        .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
+            let paths = package_paths_from_args(&args, Some(std::path::Path::new(&cwd)), true);
+            if let Some(state) = app.try_state::<AppState>() {
+                state.push_open(paths);
+            }
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.unminimize();
+                let _ = w.show();
+                let _ = w.set_focus();
+            }
+            let _ = app.emit("parcel://open-package", ());
+        }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
@@ -24,7 +39,19 @@ pub fn run() {
                     Store::open(&dir.join("parcel.db"))?
                 }
             };
-            app.manage(AppState { store: Arc::new(Mutex::new(store)), jobs: Mutex::new(Default::default()), data_dir: dir });
+            let state = AppState {
+                store: Arc::new(Mutex::new(store)),
+                jobs: Mutex::new(Default::default()),
+                data_dir: dir,
+                pending_open: Mutex::new(Vec::new()),
+                staging: Mutex::new(Default::default()),
+                known_paths: Mutex::new(Vec::new()),
+            };
+            // A package passed on the command line (double-click / "Open with") opens once the UI is ready.
+            state.push_open(package_paths_from_args(std::env::args(), std::env::current_dir().ok().as_deref(), true));
+            // Reclaim space from imports that were interrupted or whose workspaces are gone.
+            commands::cleanup_managed(&state);
+            app.manage(state);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -87,6 +114,9 @@ pub fn run() {
             commands::remove_recent_package,
             commands::clear_recent_packages,
             commands::list_revisions,
+            commands::take_launch_packages,
+            commands::reveal_source,
+            commands::reveal_output,
             commands::get_prefs,
             commands::set_pref,
             commands::cancel_job,

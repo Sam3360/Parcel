@@ -37,6 +37,10 @@ export interface MockState {
   exportProblems: { missing: T.SourceProblem[]; changed: T.SourceProblem[] } | null;
   verify: Record<string, T.IntegrityReport>;
   exported: { dest: string; accept: boolean }[];
+  launch: string[];
+  revealed: { kind: 'source' | 'output'; value: string }[];
+  dropHandlers: Set<(p: string[]) => void>;
+  openHandlers: Set<() => void>;
   extracted: { path: string; dest: string; ids: string[] | null; policy: string }[];
 }
 
@@ -120,6 +124,10 @@ export function createMockApi(
     exportProblems: null,
     exported: [],
     extracted: [],
+    launch: [],
+    revealed: [],
+    dropHandlers: new Set(),
+    openHandlers: new Set(),
     ...seed,
   };
   const ws = (wid: string) => {
@@ -407,6 +415,13 @@ export function createMockApi(
       s.deps = s.deps.filter((d) => d.id !== did);
     },
     openExternal: async () => {},
+    takeLaunchPackages: async () => s.launch.splice(0, s.launch.length),
+    revealSource: async (eid) => {
+      s.revealed.push({ kind: 'source', value: eid });
+    },
+    revealOutput: async (p) => {
+      s.revealed.push({ kind: 'output', value: p });
+    },
 
     addPaths: async (wid, parent, paths) => {
       const rep: T.AddReport = {
@@ -616,8 +631,19 @@ export function createMockApi(
     pickSaveParcel: async () => s.picks.save,
     pickDirectory: async () => s.picks.dir,
     pickAnyFile: async () => s.picks.any,
-    onFileDrop: () => () => {},
+    onFileDrop: (cb) => {
+      s.dropHandlers.add(cb);
+      return () => {
+        s.dropHandlers.delete(cb);
+      };
+    },
     onProgress: () => () => {},
+    onOpenPackage: (cb) => {
+      s.openHandlers.add(cb);
+      return () => {
+        s.openHandlers.delete(cb);
+      };
+    },
     ...overrides,
   };
   return { api, state: s };

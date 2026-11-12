@@ -8,7 +8,7 @@ Parcel is an offline Windows desktop app (Tauri 2 + React + Rust) for collecting
 - Your original files are only ever **read**. Parcel never modifies, moves or deletes them.
 - Imported packages are treated as hostile input (path traversal, ZIP bombs, symlinks, malformed manifests are all rejected).
 
-> **Status:** v1.0.0 scope is implemented and tested. The Windows desktop application has been built and manually tested, and a Windows x64 NSIS installer has been generated. See [Verification status](#verification-status) and [Building on Windows](#building-on-windows).
+> **Status:** v1.0.0 was released; its Windows build and installer were manually tested by the maintainer. **v1.1.0 is in preparation**: its changes have been tested on Linux only, and Windows validation (double-click / Open With, forwarding to a running instance, drag-and-drop outside the editor, Show in folder) is still to be done. See [Verification status](#verification-status), [CHANGELOG.md](CHANGELOG.md) and [Building on Windows](#building-on-windows).
 
 ## What works
 
@@ -19,11 +19,12 @@ Parcel is an offline Windows desktop app (Tauri 2 + React + Rust) for collecting
 | Organising | Folder tree, move (drag-and-drop or dialog), manual order, rename, multi-select, batch tag, remove-from-workspace (never deletes originals), list/grid views, sort, filter by type/tag, search across names, descriptions, tags, metadata and note text (`kind:` `tag:` `ext:` operators). |
 | Notes & references | Markdown notes with live preview and autosave, workspace-level notes, categorised references, link entries. URLs are stored as text only and opened in your browser only after you confirm. |
 | Source intelligence | Detects **missing** and **changed** sources, lets you relink (validated by checksum) or explicitly accept a change; finds **duplicate content**; blocks export until problems are resolved — nothing is replaced silently. |
-| Packages | Export (streaming, atomic, verified after writing, cancellable, never overwrites without the OS save-dialog confirmation), open, browse, search, preview (images, text, Markdown, JSON, CSV; PDF via the WebView viewer), verify, extract all/selected with conflict policy, import as workspace, import ZIP, compare two packages. |
+| Packages | Export (streaming, atomic, verified after writing, cancellable, never overwrites without the OS save-dialog confirmation), open (from the app, by double-clicking a `.parcel`, via *Open with*, or by dropping it on the window), browse, search, preview (images, text, Markdown, JSON, CSV; PDF via the WebView viewer), verify, extract all/selected with conflict policy, import as workspace (extracted outside the database lock, created atomically; cancelled or failed imports leave nothing behind), import ZIP, compare two packages. |
 | Templates & profiles | Five built-in templates, save your own (or a workspace's structure), export profiles (compression, verification, exclusions, file-name pattern). |
 | Revisions | Each export of a workspace is a numbered revision of the same package lineage. |
 | Dependencies | Declare entry→entry and external dependencies; cycles and dangling targets are diagnosed. |
 | CLI | `parcel inspect` `verify` `extract` `create` `validate` `compare` `import-zip`, using the same engine as the app. |
+| Large collections | Windowed list view and package table (only visible rows are rendered), grid view loads in chunks, filterable item picker; *Show in folder* for source files, exports and extractions. |
 | UI | Light/dark/system themes, compact density, reduced motion, keyboard shortcuts (press `?`), context menus, focus-trapped dialogs, progress with cancellation. |
 
 ## Repository layout
@@ -84,7 +85,9 @@ cargo build --release -p parcel-cli      # target\release\parcel.exe
 
 See [CHANGELOG.md](CHANGELOG.md) for the exact test results recorded for this release and the list of known limitations.
 
-The v1.0.0 codebase has been tested on Linux, and the Windows build has been compiled successfully. The Windows desktop application has also been launched and manually tested. The NSIS installer has been generated successfully.
+The v1.0.0 codebase has been tested on Linux, and the Windows build has been compiled successfully. The Windows desktop application has also been launched and manually tested. The NSIS installer has been generated successfully (all reported by the maintainer).
+
+The v1.1.0 changes are covered by automated tests on Linux (see CHANGELOG). Behaviour that depends on Windows — file association launches, the single-instance handoff, OS drag-and-drop, revealing files in Explorer, and real WebView2 scrolling of virtualised lists — can only be confirmed by testing the Windows build.
 
 ## Documentation
 

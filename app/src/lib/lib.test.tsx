@@ -73,3 +73,14 @@ describe('Markdown renderer safety', () => {
     expect(container.querySelector('blockquote')?.textContent).toBe('quoted');
   });
 });
+
+describe('isPackagePath', () => {
+  it('accepts .parcel files on either path style, case-insensitively', async () => {
+    const { isPackagePath } = await import('./format');
+    expect(isPackagePath('C:\\Users\\me\\My Pack.parcel')).toBe(true);
+    expect(isPackagePath('/home/me/x.PARCEL')).toBe(true);
+    expect(isPackagePath('C:\\x\\notes.txt')).toBe(false);
+    expect(isPackagePath('C:\\x\\.parcel')).toBe(false);
+    expect(isPackagePath('C:\\x\\a.parcel.zip')).toBe(false);
+  });
+});

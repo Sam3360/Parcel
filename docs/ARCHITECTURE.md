@@ -34,6 +34,25 @@
 
 `workspaces`, `entries` (tree via `parent_id`, kind, name, source metadata, tags/metadata JSON, note content), `refs`, `dependencies`, `activity`, `preferences`, `templates`, `export_profiles`, `recent_packages`, `revisions`. Migrations are an append-only array applied under `PRAGMA user_version`; an existing database is copied to `parcel.bak-vN` before an upgrade, a damaged database is moved aside (never deleted), and a database from a newer version is refused.
 
+## Importing a package (two phases)
+
+1. **Stage** (`StagedImport::prepare`): open the package (all hostile-input checks), read notes, extract and verify files into `…/imported/<new workspace uuid>/`. No database access, so the Tauri layer holds no lock. Any failure or cancellation removes the folder before returning.
+2. **Commit** (`Store::commit_import`): one SQLite transaction creates the workspace, folders, entries, attachments, references and dependencies. If it fails, SQLite rolls back and the staged folder is discarded. Only files are extracted; notes live in the database.
+
+The workspace id of an import in flight is registered as *protected* so no cleanup can touch its folder.
+
+## Managed-file cleanup
+
+`Store::cleanup_managed_dirs` runs after a permanent delete and at startup. A folder under `imported/` is removed only if it is a real (non-symlink) directory named as a lower-case UUID, is not protected, has no workspace row (trashed workspaces count), and no entry in any workspace has a source path containing that UUID. The UUID substring test is deliberately tolerant of path-prefix differences (Windows `\\?\` paths), so uncertainty keeps files rather than deleting them. Duplicated workspaces share extracted files, so the folder survives until the last workspace using it is purged.
+
+## Opening packages from outside
+
+`parcel_workspace::launch` parses command-line arguments (only existing regular `.parcel` files are accepted). At startup, and from the `tauri-plugin-single-instance` callback when a second copy is launched, the paths go into a queue in `AppState`; the UI drains it with `take_launch_packages` (also triggered by a `parcel://open-package` event). The window is un-minimised and focused. Show-in-folder uses database paths (`reveal_source`) or a small allow-list of paths the app itself produced or opened (`reveal_output`).
+
+## Large lists
+
+`lib/virtual.tsx` windows fixed-height table rows inside the `.content-scroll` container (row height is measured, spacer rows preserve scroll height). Sorting, filtering and selection happen upstream on the full item array; keyboard navigation scrolls by index. Below 80 rows, or when no layout is available, everything renders.
+
 ## Workspace deletion
 
 Deleting moves a workspace to the trash (reversible). Permanent deletion only removes Parcel's records; it never touches source files or exported packages.

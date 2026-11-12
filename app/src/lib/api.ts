@@ -54,6 +54,11 @@ export interface Api {
   ): Promise<T.DepRow>;
   deleteDependency(id: string): Promise<void>;
   openExternal(url: string): Promise<void>;
+  /** Package paths passed at launch or by a second instance; returns and clears the queue. */
+  takeLaunchPackages(): Promise<string[]>;
+  revealSource(entryId: string): Promise<void>;
+  /** Show a location Parcel just created or opened in the file manager. */
+  revealOutput(path: string): Promise<void>;
   // collection & intelligence
   addPaths(
     workspaceId: string,
@@ -137,6 +142,8 @@ export interface Api {
   pickAnyFile(): Promise<string | null>;
   onFileDrop(cb: (paths: string[]) => void): () => void;
   onProgress(cb: (p: T.Progress) => void): () => void;
+  /** Fired when a second instance forwards package paths to this window. */
+  onOpenPackage(cb: () => void): () => void;
 }
 
 let current: Api | null = null;

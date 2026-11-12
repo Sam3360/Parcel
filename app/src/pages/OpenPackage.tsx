@@ -7,6 +7,7 @@ import { Icon } from '../components/Icon';
 import { PreviewPane } from '../components/PreviewPane';
 import { Markdown } from '../lib/markdown';
 import { useOpenLink } from '../features/editor/dialogs';
+import { SpacerRow, useVirtualRows } from '../lib/virtual';
 import { ZipImport } from '../features/ZipImport';
 import { describeError, errorCode } from '../lib/api';
 import {
@@ -124,6 +125,88 @@ function Landing({ onOpen, api }: { onOpen: (p: string) => void; api: ReturnType
   );
 }
 
+interface PackageTableProps {
+  items: ManifestEntry[];
+  search: string;
+  sel: Set<string>;
+  setSel: React.Dispatch<React.SetStateAction<Set<string>>>;
+  setDir: (d: string) => void;
+  setSearch: (s: string) => void;
+  failures: Map<string, unknown>;
+  verified: boolean;
+}
+
+/** The entries table lives in its own component so its row window is created and destroyed with the table. */
+function PackageTable({
+  items,
+  search,
+  sel,
+  setSel,
+  setDir,
+  setSearch,
+  failures,
+  verified,
+}: PackageTableProps) {
+  const v = useVirtualRows(items.length);
+  return (
+    <table className="table virtual" aria-label="Package entries" aria-rowcount={items.length + 1}>
+      <thead>
+        <tr>
+          <th>Name</th>
+          {search && <th>Location</th>}
+          <th>Type</th>
+          <th>Size</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody ref={v.tbodyRef}>
+        <SpacerRow height={v.topPad} cols={search ? 5 : 4} />
+        {items.slice(v.start, v.end).map((e, k) => (
+          <tr
+            key={e.id}
+            data-vrow
+            aria-rowindex={v.start + k + 2}
+            aria-selected={sel.has(e.id)}
+            onClick={(ev) =>
+              setSel((s) =>
+                ev.ctrlKey || ev.metaKey
+                  ? new Set(s.has(e.id) ? [...s].filter((x) => x !== e.id) : [...s, e.id])
+                  : new Set([e.id]),
+              )
+            }
+            onDoubleClick={() => {
+              if (e.kind === 'folder') {
+                setDir(e.path);
+                setSearch('');
+              }
+            }}
+          >
+            <td>
+              <div className="row">
+                <FileIcon kind={e.kind} name={baseName(e.path)} mime={e.mime} />
+                <span className="ellipsis" style={{ maxWidth: 380 }}>
+                  {baseName(e.path)}
+                </span>
+              </div>
+            </td>
+            {search && <td className="muted small">{parentPath(e.path) || '/'}</td>}
+            <td className="muted">{e.kind === 'file' ? extOf(e.path).toUpperCase() || 'File' : e.kind}</td>
+            <td className="muted">{e.kind === 'file' || e.kind === 'note' ? formatBytes(e.size) : ''}</td>
+            <td>
+              {failures.has(e.id) ? (
+                <Badge tone="danger">Corrupted</Badge>
+              ) : verified && e.sha256 ? (
+                <Badge tone="ok">OK</Badge>
+              ) : null}
+            </td>
+          </tr>
+        ))}
+        <SpacerRow height={v.bottomPad} cols={search ? 5 : 4} />
+      </tbody>
+    </table>
+  );
+}
+
 type Tab = 'contents' | 'notes' | 'refs' | 'checks' | 'compare';
 
 function Explorer({ path, onClose }: { path: string; onClose: () => void }) {
@@ -178,6 +261,15 @@ function Explorer({ path, onClose }: { path: string; onClose: () => void }) {
     });
     return [...s].sort();
   }, [entries]);
+  // Only folders relevant to where you are: top level, and the siblings/children along the current path.
+  const outline = useMemo(
+    () =>
+      folders.filter((f) => {
+        const pp = parentPath(f);
+        return pp === '' || pp === dir || dir === pp || dir.startsWith(pp + '/');
+      }),
+    [folders, dir],
+  );
   const selected = [...sel].map((i) => byId.get(i)).filter(Boolean) as ManifestEntry[];
   const one = selected.length === 1 ? selected[0] : null;
 
@@ -206,6 +298,10 @@ function Explorer({ path, onClose }: { path: string; onClose: () => void }) {
       toast(
         `Extracted ${plural(r.written.length, 'file')} (${formatBytes(r.bytes_written)})${r.skipped.length ? `, ${r.skipped.length} skipped` : ''}`,
         'success',
+        {
+          label: 'Show in folder',
+          onClick: () => api.revealOutput(dest).catch((e) => reportError(e, 'Could not show the folder')),
+        },
       );
       return true;
     } catch (e) {
@@ -336,7 +432,7 @@ function Explorer({ path, onClose }: { path: string; onClose: () => void }) {
           >
             <Icon name="package" /> <span className="ellipsis">{m.name}</span>
           </button>
-          {folders.map((f) => (
+          {outline.map((f) => (
             <button
               key={f}
               className="tree-item"
@@ -398,61 +494,16 @@ function Explorer({ path, onClose }: { path: string; onClose: () => void }) {
                     title={search ? 'No matches' : 'This folder is empty'}
                   />
                 ) : (
-                  <table className="table" aria-label="Package entries">
-                    <thead>
-                      <tr>
-                        <th>Name</th>
-                        {search && <th>Location</th>}
-                        <th>Type</th>
-                        <th>Size</th>
-                        <th>Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {items.map((e) => (
-                        <tr
-                          key={e.id}
-                          aria-selected={sel.has(e.id)}
-                          onClick={(ev) =>
-                            setSel((s) =>
-                              ev.ctrlKey || ev.metaKey
-                                ? new Set(s.has(e.id) ? [...s].filter((x) => x !== e.id) : [...s, e.id])
-                                : new Set([e.id]),
-                            )
-                          }
-                          onDoubleClick={() => {
-                            if (e.kind === 'folder') {
-                              setDir(e.path);
-                              setSearch('');
-                            }
-                          }}
-                        >
-                          <td>
-                            <div className="row">
-                              <FileIcon kind={e.kind} name={baseName(e.path)} mime={e.mime} />
-                              <span className="ellipsis" style={{ maxWidth: 380 }}>
-                                {baseName(e.path)}
-                              </span>
-                            </div>
-                          </td>
-                          {search && <td className="muted small">{parentPath(e.path) || '/'}</td>}
-                          <td className="muted">
-                            {e.kind === 'file' ? extOf(e.path).toUpperCase() || 'File' : e.kind}
-                          </td>
-                          <td className="muted">
-                            {e.kind === 'file' || e.kind === 'note' ? formatBytes(e.size) : ''}
-                          </td>
-                          <td>
-                            {failures.has(e.id) ? (
-                              <Badge tone="danger">Corrupted</Badge>
-                            ) : report && e.sha256 ? (
-                              <Badge tone="ok">OK</Badge>
-                            ) : null}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                  <PackageTable
+                    items={items}
+                    search={search}
+                    sel={sel}
+                    setSel={setSel}
+                    setDir={setDir}
+                    setSearch={setSearch}
+                    failures={failures}
+                    verified={!!report}
+                  />
                 )}
               </div>
             </>
@@ -614,6 +665,14 @@ function Explorer({ path, onClose }: { path: string; onClose: () => void }) {
                 <dt>Content</dt>
                 <dd>{formatBytes(entries.reduce((n, e) => n + e.size, 0))}</dd>
               </dl>
+              <Button
+                icon="folder"
+                onClick={() =>
+                  api.revealOutput(path).catch((e) => reportError(e, 'Could not show the package'))
+                }
+              >
+                Show package in folder
+              </Button>
               <p className="muted small">
                 {sel.size > 1
                   ? `${sel.size} items selected.`

@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useApp, type Route } from './hooks/app';
 import { Icon, type IconName } from './components/Icon';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { isTyping } from './lib/shortcuts';
+import { isPackagePath } from './lib/format';
 import { HomePage } from './pages/Home';
 import { WorkspacesPage } from './pages/Workspaces';
 import { OpenPackagePage } from './pages/OpenPackage';
@@ -20,7 +21,9 @@ const NAV: { page: Route['page']; label: string; icon: IconName }[] = [
 ];
 
 export function App() {
-  const { route, navigate, api, showShortcuts } = useApp();
+  const { route, navigate, api, showShortcuts, toast, reportError } = useApp();
+  const routeRef = useRef(route);
+  routeRef.current = route;
   const [version, setVersion] = useState('');
   const [resetKey, setResetKey] = useState(0);
   useEffect(() => {
@@ -29,6 +32,40 @@ export function App() {
       .then((i) => setVersion(i.version))
       .catch(() => {});
   }, [api]);
+
+  // Packages passed at launch (double-click / "Open with") or forwarded by a second instance.
+  const openPending = useCallback(async () => {
+    try {
+      const paths = await api.takeLaunchPackages();
+      if (paths.length === 0) return;
+      navigate({ page: 'open', path: paths[0] });
+      if (paths.length > 1)
+        toast(`Opened the first of ${paths.length} packages. Open the others from Open Package.`);
+    } catch (e) {
+      reportError(e, 'Could not open the package');
+    }
+  }, [api, navigate, toast, reportError]);
+  useEffect(() => {
+    void openPending();
+    return api.onOpenPackage(() => void openPending());
+  }, [api, openPending]);
+
+  // Files dropped on the window anywhere except inside a workspace (the editor handles its own drops).
+  useEffect(
+    () =>
+      api.onFileDrop((paths) => {
+        const r = routeRef.current;
+        if (r.page === 'workspaces' && r.workspaceId) return;
+        const packages = paths.filter(isPackagePath);
+        if (packages.length > 0) {
+          navigate({ page: 'open', path: packages[0] });
+          if (packages.length > 1) toast(`Opened the first of ${packages.length} packages.`);
+        } else if (paths.length > 0) {
+          toast('To add files, open a workspace and drop them there. Drop a .parcel file to open it.');
+        }
+      }),
+    [api, navigate, toast],
+  );
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

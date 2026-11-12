@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { FileIcon } from '../../components/FileIcon';
 import { PreviewPane } from '../../components/PreviewPane';
 import { Button, IconButton, Badge } from '../../components/ui';
@@ -6,6 +6,7 @@ import { formatBytes, formatDateTime, plural } from '../../lib/format';
 import { useApp } from '../../hooks/app';
 import type { DepRow, Entry, SourceState, Workspace, WorkspaceStats } from '../../lib/types';
 import { StatusBadge } from './EntryViews';
+import { EntryPicker } from './EntryPicker';
 import { useOpenLink } from './dialogs';
 
 interface Props {
@@ -189,7 +190,11 @@ function EntryInfo(p: Props & { entry: Entry }) {
     }
   };
   const st = p.status.get(e.id);
-  const others = p.entries.filter((x) => x.id !== e.id && x.kind !== 'folder');
+  const others = useMemo(
+    () => p.entries.filter((x) => x.id !== e.id && x.kind !== 'folder'),
+    [p.entries, e.id],
+  );
+  const attachable = useMemo(() => others.filter((x) => x.kind !== 'note'), [others]);
   return (
     <div className="inspector" aria-label="Inspector">
       <div className="row">
@@ -213,6 +218,14 @@ function EntryInfo(p: Props & { entry: Entry }) {
         />
       )}
       <div className="row wrap">
+        {e.kind === 'file' && e.source_path && (
+          <Button
+            icon="folder"
+            onClick={() => api.revealSource(e.id).catch((err) => reportError(err, 'Could not show the file'))}
+          >
+            Show in folder
+          </Button>
+        )}
         {e.kind === 'note' && (
           <Button icon="edit" onClick={() => p.onEditNote(e)}>
             Edit note
@@ -288,22 +301,15 @@ function EntryInfo(p: Props & { entry: Entry }) {
       <Metadata value={e.metadata} onChange={(metadata) => upd({ metadata })} />
       {e.kind === 'note' && (
         <div className="field">
-          <label htmlFor="insp-att">Attached to</label>
-          <select
-            id="insp-att"
-            className="select"
-            value={e.attached_to ?? ''}
-            onChange={(ev) => upd({ attached_to: ev.target.value || null })}
-          >
-            <option value="">Whole workspace</option>
-            {others
-              .filter((x) => x.kind !== 'note')
-              .map((x) => (
-                <option key={x.id} value={x.id}>
-                  {p.paths.get(x.id)}
-                </option>
-              ))}
-          </select>
+          <label>Attached to</label>
+          <EntryPicker
+            label="Attached to"
+            entries={attachable}
+            paths={p.paths}
+            value={e.attached_to}
+            clearLabel="Whole workspace"
+            onChange={(id) => upd({ attached_to: id })}
+          />
         </div>
       )}
       {e.kind !== 'folder' && (
@@ -338,19 +344,14 @@ function EntryInfo(p: Props & { entry: Entry }) {
               <option value="external">External</option>
             </select>
             {dep.kind === 'entry' ? (
-              <select
-                className="select grow"
-                aria-label="Dependency target"
-                value={dep.target}
-                onChange={(ev) => setDep({ ...dep, target: ev.target.value })}
-              >
-                <option value="">Choose…</option>
-                {others.map((x) => (
-                  <option key={x.id} value={x.id}>
-                    {p.paths.get(x.id)}
-                  </option>
-                ))}
-              </select>
+              <EntryPicker
+                grow
+                label="Dependency target"
+                entries={others}
+                paths={p.paths}
+                value={dep.target || null}
+                onChange={(id) => setDep({ ...dep, target: id ?? '' })}
+              />
             ) : (
               <input
                 className="input grow"

@@ -1,6 +1,7 @@
 //! Higher-level workspace operations: adding scanned content, source checks, export, import.
 use crate::collect::{ScanReport, ScannedItem};
 use crate::error::{Result, SourceProblem, WsError};
+use crate::import::StagedImport;
 use crate::models::*;
 use crate::store::{new_id, now, Store};
 use crate::templates::{glob_match, ProfileSpec};
@@ -8,7 +9,6 @@ use parcel_core::cancel::{CancelToken, ProgressFn};
 use parcel_core::intel::{self, DuplicateGroup, HashedItem, SourceRecord, SourceStatus};
 use parcel_core::limits::ResourceLimits;
 use parcel_core::manifest::{self as mf, Dependency, DependencyKind, EntryKind, Manifest, Reference};
-use parcel_core::reader::{ConflictPolicy, ExtractOptions, PackageReader};
 use parcel_core::writer::{BuildInput, BuildItem, BuildReport, ExportOptions, ItemContent};
 use rusqlite::params;
 use serde::Serialize;
@@ -65,7 +65,16 @@ pub struct ExportOutcome {
 impl Store {
     /// Insert scanned items under `parent`. Name collisions are auto-numbered; sources that are
     /// already in this workspace are skipped rather than duplicated.
+    ///
+    /// The whole addition is one transaction: if anything fails, nothing from this call is kept.
     pub fn add_scanned(&mut self, ws: &str, parent: Option<&str>, scan: &ScanReport) -> Result<AddReport> {
+        let tx = self.conn.unchecked_transaction()?;
+        let rep = self.add_scanned_inner(ws, parent, scan)?; // an early return drops `tx`, rolling back
+        tx.commit()?;
+        Ok(rep)
+    }
+
+    fn add_scanned_inner(&self, ws: &str, parent: Option<&str>, scan: &ScanReport) -> Result<AddReport> {
         self.get_workspace(ws)?;
         let mut rep = AddReport { warnings: scan.warnings.clone(), ..Default::default() };
         let existing_sources: HashSet<String> = self.list_entries(ws)?.into_iter().filter_map(|e| e.source_path).collect();
@@ -122,7 +131,7 @@ impl Store {
     }
 
     fn resolve_dir(
-        &mut self,
+        &self,
         ws: &str,
         base: Option<&str>,
         dir: &[String],
@@ -429,8 +438,8 @@ impl Store {
     }
 
     // ---------- import ----------
-    /// Create a new workspace from a package. Content is extracted (with verification) into
-    /// `managed_dir/<workspace id>/`, which Parcel then owns; the package file itself is untouched.
+    /// Create a new workspace from a package: stage (extract + verify) outside the database, then
+    /// commit atomically. Convenience wrapper for callers that do not need to release a lock in between.
     pub fn import_package(
         &mut self,
         pkg: &Path,
@@ -439,122 +448,54 @@ impl Store {
         cancel: &CancelToken,
         progress: ProgressFn<'_>,
     ) -> Result<Workspace> {
-        let mut reader = PackageReader::open(pkg, limits)?;
-        let m = reader.manifest().clone();
-        let notes = reader.notes()?;
-        let ws = self.create_workspace(&m.name, &m.description, None)?;
-        let root = managed_dir.join(&ws.id);
-        let result = (|| -> Result<()> {
-            let opts = ExtractOptions { selection: None, conflict: ConflictPolicy::Fail, limits: limits.clone() };
-            // Links are not extracted as files here; they become link entries.
-            let sel: Vec<String> = m.entries.iter().filter(|e| e.kind != EntryKind::Link).map(|e| e.id.clone()).collect();
-            let opts = ExtractOptions { selection: Some(sel), ..opts };
-            reader.extract(&root, &opts, cancel, progress)?;
-            let root = root.canonicalize()?;
-            let mut idmap: HashMap<String, String> = HashMap::new();
-            let mut sorted: Vec<&mf::Entry> = m.entries.iter().collect();
-            sorted.sort_by_key(|e| e.path.matches('/').count());
-            let tx_ids: Vec<(String, String)> = vec![];
-            let _ = tx_ids;
-            for e in sorted {
-                let (parent_path, name) = match e.path.rsplit_once('/') {
-                    Some((p, n)) => (Some(p.to_string()), n.to_string()),
-                    None => (None, e.path.clone()),
-                };
-                let parent_id = match &parent_path {
-                    Some(p) => Some(self.ensure_folder_path(&ws.id, p)?),
-                    None => None,
-                };
-                let new = match e.kind {
-                    EntryKind::Folder => self.ensure_folder_path(&ws.id, &e.path)?,
-                    EntryKind::Note => {
-                        let (bytes, _) = reader.read_entry_prefix(&e.id, 16 * 1024 * 1024)?;
-                        let n = self.create_note(&ws.id, parent_id.as_deref(), &name, &String::from_utf8_lossy(&bytes), None)?;
-                        // Preserve the exact name (create_note appends .md only when missing).
-                        n.id
-                    }
-                    EntryKind::Link => {
-                        self.create_link(&ws.id, parent_id.as_deref(), &name, e.url.as_deref().unwrap_or(""), &e.description)?.id
-                    }
-                    EntryKind::File => {
-                        let src = parcel_core::pathsafe::safe_join(&root, &e.path, limits)?;
-                        let scan = ScannedItem {
-                            is_folder: false,
-                            dir: vec![],
-                            name: name.clone(),
-                            source_path: Some(src.clone()),
-                            size: e.size,
-                            sha256: e.sha256.clone(),
-                            mime: e.mime.clone(),
-                            mtime_ms: intel::mtime_ms(&src),
-                        };
-                        let id = new_id();
-                        let ts = now();
-                        self.conn.execute(
-                            "INSERT INTO entries(id,workspace_id,parent_id,kind,name,sort_order,origin,source_path,size,sha256,mime,source_mtime_ms,created_at,modified_at)
-                             VALUES(?1,?2,?3,'file',?4,(SELECT COALESCE(MAX(sort_order),0)+1 FROM entries WHERE workspace_id=?2 AND parent_id IS ?3),'imported',?5,?6,?7,?8,?9,?10,?10)",
-                            params![id, ws.id, parent_id, name, src.to_string_lossy(), scan.size as i64, scan.sha256, scan.mime, scan.mtime_ms, ts],
-                        )?;
-                        id
-                    }
-                };
-                self.conn.execute(
-                    "UPDATE entries SET description=?2,tags=?3,metadata=?4 WHERE id=?1",
-                    params![
-                        new,
-                        e.description,
-                        serde_json::to_string(&e.tags)?,
-                        serde_json::to_string(
-                            &e.metadata.iter().filter(|(k, _)| *k != "parcel.attached_to").collect::<std::collections::BTreeMap<_, _>>()
-                        )?
-                    ],
-                )?;
-                idmap.insert(e.id.clone(), new);
+        let staged = StagedImport::prepare(pkg, managed_dir, &new_id(), limits, cancel, progress)?;
+        cancel.check()?;
+        match self.commit_import(&staged) {
+            Ok(w) => Ok(w),
+            Err(e) => {
+                staged.discard();
+                Err(e)
             }
-            for e in &m.entries {
-                if let Some(a) = e.metadata.get("parcel.attached_to").and_then(|a| idmap.get(a)) {
-                    self.conn.execute("UPDATE entries SET attached_to=?2 WHERE id=?1", params![idmap[&e.id], a])?;
-                }
-            }
-            for r in &m.references {
-                self.add_reference(
-                    &ws.id,
-                    RefInput {
-                        title: r.title.clone(),
-                        url: r.url.clone(),
-                        description: r.description.clone(),
-                        category: r.category.clone(),
-                        entry_id: r.entry_id.as_ref().and_then(|i| idmap.get(i).cloned()),
-                    },
-                )?;
-            }
-            for d in &m.dependencies {
-                let kind = if d.kind == DependencyKind::Entry { "entry" } else { "external" };
-                let target = if d.kind == DependencyKind::Entry { idmap.get(&d.target).cloned() } else { Some(d.target.clone()) };
-                if let (Some(from), Some(target)) = (idmap.get(&d.from_entry), target) {
-                    self.add_dependency(&ws.id, from, kind, &target, &d.description, d.required)?;
-                }
-            }
-            Ok(())
-        })();
-        if let Err(e) = result {
-            // Roll back: remove the half-built workspace and extracted files.
-            let _ = self.conn.execute("DELETE FROM workspaces WHERE id=?1", [&ws.id]);
-            let _ = std::fs::remove_dir_all(&root);
-            return Err(e);
         }
-        self.conn.execute(
-            "UPDATE workspaces SET notes=?2,metadata=?3,package_id=?4,revision=?5,modified_at=?6 WHERE id=?1",
-            params![ws.id, notes, serde_json::to_string(&m.metadata)?, m.package_id, m.revision as i64, now()],
-        )?;
-        self.add_recent_package(&pkg.to_string_lossy(), &m.name, reader.file_size() as i64)?;
-        self.log(
-            Some(&ws.id),
-            "package.imported",
-            &format!("Imported package “{}”", m.name),
-            serde_json::json!({"path": pkg.to_string_lossy()}),
-        );
-        self.get_workspace(&ws.id)
+    }
+
+    // ---------- diagnostics ----------
+    /// Static dependency/reference diagnostics for the whole workspace. Unlike an export preparation this
+    /// never inspects source files, so it keeps working when sources are missing or changed.
+    pub fn diagnose_dependencies(&self, ws: &str) -> Result<Vec<parcel_core::intel::Diagnostic>> {
+        let w = self.get_workspace(ws)?;
+        let mut m = Manifest::new(&w.name, "");
+        let paths = self.entry_paths(ws)?;
+        for e in self.list_entries(ws)? {
+            let kind = match e.kind.as_str() {
+                "folder" => EntryKind::Folder,
+                "note" => EntryKind::Note,
+                "link" => EntryKind::Link,
+                _ => EntryKind::File,
+            };
+            m.entries.push(mf::Entry::new(kind, e.id.clone(), paths[&e.id].clone()));
+        }
+        for r in self.list_references(ws)? {
+            m.references.push(Reference {
+                id: r.id,
+                title: r.title,
+                url: r.url,
+                description: r.description,
+                category: r.category,
+                entry_id: r.entry_id,
+            });
+        }
+        for d in self.list_dependencies(ws)? {
+            m.dependencies.push(Dependency {
+                id: d.id,
+                kind: if d.kind == "entry" { DependencyKind::Entry } else { DependencyKind::External },
+                from_entry: d.from_entry,
+                target: d.target,
+                description: d.description,
+                required: d.required,
+            });
+        }
+        Ok(parcel_core::intel::diagnose_dependencies(&m))
     }
 }
 

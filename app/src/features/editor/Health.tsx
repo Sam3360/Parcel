@@ -161,6 +161,13 @@ export function Health({
                   <div className="muted small mono ellipsis">{c.source_path}</div>
                 </button>
                 {c.state === 'changed' && <Button onClick={() => accept([c.entry_id])}>Accept change</Button>}
+                <Button
+                  onClick={() =>
+                    api.revealSource(c.entry_id).catch((e) => reportError(e, 'Could not show the location'))
+                  }
+                >
+                  Show in folder
+                </Button>
                 <Button onClick={() => relink(c)}>Relink…</Button>
               </div>
             ))}

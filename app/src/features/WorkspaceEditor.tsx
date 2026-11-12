@@ -17,7 +17,7 @@ import type {
   WorkspaceStats,
 } from '../lib/types';
 import { Tree } from './editor/Tree';
-import { GridView, ListView } from './editor/EntryViews';
+import { GridView, ListView, type ViewApi } from './editor/EntryViews';
 import { Inspector } from './editor/Inspector';
 import { Health } from './editor/Health';
 import { References } from './editor/References';
@@ -53,6 +53,7 @@ export function WorkspaceEditor({ id, onBack }: { id: string; onBack: () => void
   const [noteTarget, setNoteTarget] = useState<Entry | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const centerRef = useRef<HTMLDivElement>(null);
+  const viewApi = useRef<ViewApi | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -451,7 +452,7 @@ export function WorkspaceEditor({ id, onBack }: { id: string; onBack: () => void
             if (e.shiftKey) setSelected((s) => new Set([...s, next.id]));
             else setSelected(new Set([next.id]));
             anchor.current = next.id;
-            document.querySelector(`[data-entry-id="${next.id}"]`)?.scrollIntoView?.({ block: 'nearest' });
+            viewApi.current?.scrollToId(next.id);
           }
         } else if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
           if (sel.length) {
@@ -494,6 +495,7 @@ export function WorkspaceEditor({ id, onBack }: { id: string; onBack: () => void
     onClick: click,
     onOpen: open,
     onContext: showContext,
+    apiRef: viewApi,
   };
 
   return (
@@ -874,7 +876,10 @@ export function WorkspaceEditor({ id, onBack }: { id: string; onBack: () => void
           onClose={() => setDialog(null)}
           onDone={async (o) => {
             setDialog(null);
-            toast(exportSummary(o), 'success');
+            toast(exportSummary(o), 'success', {
+              label: 'Show in folder',
+              onClick: () => api.revealOutput(o.path).catch((e) => reportError(e, 'Could not show the file')),
+            });
             o.warnings.forEach((w) => toast(w, 'warn'));
             await refresh();
             await checkSources(false);

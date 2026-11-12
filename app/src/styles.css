@@ -1048,3 +1048,9 @@ button.list-row:hover {
   border: 3px solid transparent;
   background-clip: content-box;
 }
+
+/* Windowed tables render a fixed-height row per item so spacer rows stay exact. */
+.table.virtual tbody tr[data-vrow] td {
+  white-space: nowrap;
+  overflow: hidden;
+}

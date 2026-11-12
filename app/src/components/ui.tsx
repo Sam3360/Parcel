@@ -70,7 +70,7 @@ export function EmptyState({
     <div className="empty">
       <Icon name={icon} size={30} />
       <h3>{title}</h3>
-      {children && <p style={{ maxWidth: 420 }}>{children}</p>}
+      {children && <div style={{ maxWidth: 420 }}>{children}</div>}
       {action}
     </div>
   );

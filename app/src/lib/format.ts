@@ -81,3 +81,7 @@ export function parseCsv(text: string, delimiter = ','): string[][] {
   }
   return rows;
 }
+
+export function isPackagePath(path: string): boolean {
+  return /[^\\/]\.parcel$/i.test(path);
+}

@@ -32,9 +32,17 @@ Type in the search box (Ctrl+F). Plain words match names, descriptions, tags, me
 
 ## Opening packages
 
-*Open Package* (Ctrl+O) works without any workspace. You can browse folders, search, preview files, read notes and references, **Verify integrity**, **Extract** everything or a selection, **Import as workspace** to edit it, or **Compare** it with an older version. If a package looks unsafe or damaged, Parcel refuses to open it and tells you why; nothing is extracted or run.
+*Open Package* (Ctrl+O) works without any workspace. You can also open a package by double-clicking a `.parcel` file, choosing *Open with → Parcel*, or dropping the file onto the Parcel window (on any page except inside a workspace, where dropped files are added to the workspace). If Parcel is already running, the package opens in the existing window. You can browse folders, search, preview files, read notes and references, **Verify integrity**, **Extract** everything or a selection, **Import as workspace** to edit it, or **Compare** it with an older version. If a package looks unsafe or damaged, Parcel refuses to open it and tells you why; nothing is extracted or run.
 
 When extracting, pick what happens if a file already exists: stop before writing anything (default), keep both, or skip existing. Parcel never overwrites silently.
+
+Importing a package as a workspace copies its files into Parcel's own storage (verified as they are written) and creates the workspace in one step: if you cancel, or anything fails, no workspace is created and nothing is left behind. When you permanently delete an imported workspace, its stored files are removed too — unless another workspace (for example a duplicate) still uses them.
+
+**Show in folder** appears on collected files, on missing/changed sources in the Health tab, after an export or extraction, and for the open package.
+
+## Large workspaces
+
+Lists only draw the rows you can see, so folders with thousands of items stay responsive; sorting, search, selection (including Ctrl+A and Shift+click ranges) and keyboard navigation work across all items. Grid view shows 400 items at a time with a *Show more* button. Choosing an item for a dependency or a note attachment opens a filterable list.
 
 ## Importing a ZIP
 
