@@ -53,6 +53,12 @@ The workspace id of an import in flight is registered as *protected* so no clean
 
 `lib/virtual.tsx` windows fixed-height table rows inside the `.content-scroll` container (row height is measured, spacer rows preserve scroll height). Sorting, filtering and selection happen upstream on the full item array; keyboard navigation scrolls by index. Below 80 rows, or when no layout is available, everything renders.
 
+## Undoable removal and stored-file cleanup (`removal.rs`)
+
+`Store::remove_entries` deletes the rows in one transaction and keeps an in-memory snapshot (entries, references, dependencies, attachments) per workspace, up to 20 deep. **Nothing is persisted**, so there is no schema change and a crash simply loses the ability to undo. `undo_remove` re-inserts the snapshot atomically (parents first, deferred foreign keys): items whose folder disappeared go to the workspace root, name clashes get a numeric suffix, links from references and notes are re-attached.
+
+Stored copies of imported files (`origin = "imported"`) are deleted only when a removal becomes **final** — history overflow, leaving the workspace (`finalize_removals`), or app exit — and only if the file lies under `<managed root>/<workspace uuid>/` and no entry in any workspace and no pending undo refers to it. Paths are compared through `norm_path` (strips `\\?\`, unifies slashes, lower-cases), so differences in spelling can only make paths compare equal and keep the file. Relinking an imported item to the user's own file frees the stored copy by the same rules. `scan_managed_storage` / `remove_unused_storage` back *Settings → Storage* and recompute everything at deletion time.
+
 ## Workspace deletion
 
 Deleting moves a workspace to the trash (reversible). Permanent deletion only removes Parcel's records; it never touches source files or exported packages.

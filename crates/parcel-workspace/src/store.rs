@@ -8,6 +8,11 @@ use std::path::Path;
 
 pub struct Store {
     pub(crate) conn: Connection,
+    /// Session-only undo history of removals (see `removal.rs`). Deliberately not persisted: no schema change.
+    pub(crate) undo: std::sync::Mutex<std::collections::HashMap<String, Vec<crate::removal::UndoEntry>>>,
+    pub(crate) undo_seq: std::sync::atomic::AtomicU64,
+    /// Root of Parcel's own storage for imported files. File cleanup only ever acts inside it.
+    pub(crate) managed_root: std::sync::Mutex<Option<std::path::PathBuf>>,
 }
 
 pub fn now() -> String {
@@ -17,7 +22,7 @@ pub fn new_id() -> String {
     uuid::Uuid::new_v4().to_string()
 }
 
-const ENTRY_COLS: &str = "id,workspace_id,parent_id,kind,name,description,url,content,attached_to,sort_order,origin,source_path,size,sha256,mime,source_mtime_ms,tags,metadata,created_at,modified_at";
+pub(crate) const ENTRY_COLS: &str = "id,workspace_id,parent_id,kind,name,description,url,content,attached_to,sort_order,origin,source_path,size,sha256,mime,source_mtime_ms,tags,metadata,created_at,modified_at";
 
 fn row_entry(r: &Row) -> rusqlite::Result<Entry> {
     let tags: String = r.get(16)?;
@@ -87,10 +92,13 @@ pub fn validate_name(name: &str) -> Result<String> {
 
 impl Store {
     pub fn open(path: &Path) -> Result<Self> {
-        Ok(Self { conn: crate::db::open(path)? })
+        Ok(Self::from_conn(crate::db::open(path)?))
     }
     pub fn open_in_memory() -> Result<Self> {
-        Ok(Self { conn: crate::db::open_in_memory()? })
+        Ok(Self::from_conn(crate::db::open_in_memory()?))
+    }
+    fn from_conn(conn: Connection) -> Self {
+        Self { conn, undo: Default::default(), undo_seq: Default::default(), managed_root: Default::default() }
     }
     pub fn schema_version(&self) -> Result<i64> {
         crate::db::schema_version(&self.conn)
@@ -371,6 +379,7 @@ impl Store {
             return Err(WsError::Invalid("only workspaces in the trash can be permanently deleted".into()));
         }
         self.conn.execute("DELETE FROM workspaces WHERE id=?1", [id])?;
+        self.undo.lock().unwrap().remove(id); // its pending undo history goes with it
         self.log(None, "workspace.purged", &format!("Permanently deleted “{}”", w.name), serde_json::Value::Null);
         Ok(())
     }
@@ -1179,4 +1188,34 @@ impl Store {
         }
         Ok(out)
     }
+}
+
+/// Insert one full entry row (all columns, original ids and timestamps). Used when restoring removed entries.
+pub(crate) fn insert_entry_row(conn: &Connection, e: &Entry) -> Result<()> {
+    conn.execute(
+        &format!("INSERT INTO entries({ENTRY_COLS}) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20)"),
+        params![
+            e.id,
+            e.workspace_id,
+            e.parent_id,
+            e.kind,
+            e.name,
+            e.description,
+            e.url,
+            e.content,
+            e.attached_to,
+            e.sort_order,
+            e.origin,
+            e.source_path,
+            e.size,
+            e.sha256,
+            e.mime,
+            e.source_mtime_ms,
+            serde_json::to_string(&e.tags)?,
+            serde_json::to_string(&e.metadata)?,
+            e.created_at,
+            e.modified_at
+        ],
+    )?;
+    Ok(())
 }

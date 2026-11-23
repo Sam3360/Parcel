@@ -34,7 +34,14 @@ export interface Api {
   updateEntry(id: string, update: T.EntryUpdate): Promise<T.Entry>;
   moveEntries(ids: string[], newParent: string | null): Promise<void>;
   reorderEntries(workspaceId: string, parentId: string | null, orderedIds: string[]): Promise<void>;
-  deleteEntries(ids: string[]): Promise<number>;
+  /** Removes items from the workspace (originals are never touched). Undoable until it becomes final. */
+  deleteEntries(ids: string[]): Promise<T.RemovalReceipt>;
+  undoRemove(workspaceId: string): Promise<T.UndoOutcome>;
+  listRemovals(workspaceId: string): Promise<T.RemovalSummary[]>;
+  /** Makes pending removals final and frees the stored copies nothing uses any more. */
+  finalizeRemovals(workspaceId: string): Promise<T.StorageOutcome>;
+  storageReport(): Promise<T.StorageReport>;
+  removeUnusedStorage(): Promise<T.StorageOutcome>;
   batchTag(ids: string[], add: string[], remove: string[]): Promise<void>;
   searchEntries(workspaceId: string, query: T.SearchQuery): Promise<T.Entry[]>;
   workspaceStats(workspaceId: string): Promise<T.WorkspaceStats>;

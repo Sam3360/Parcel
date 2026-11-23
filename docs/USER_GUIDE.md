@@ -20,6 +20,14 @@ A **workspace** is a place to gather things before you package them. You add fil
 
 Removing an item (Delete) only removes it from the workspace. **Your original files are never deleted or modified.**
 
+### Undo
+
+Press **Ctrl+Z** (or the *Undo* button in the toast, or *Undo remove* in the toolbar) to bring back what you just removed: items, everything inside removed folders, and their notes' links, references and dependencies. If the folder it was in is gone, the item returns to the top level; if its name has been taken, it comes back with a number added. You can undo up to 20 removals in a row. Undo history is kept while the app is running and is cleared when you leave the workspace.
+
+### Files Parcel stores
+
+Files you add from your computer stay where they are, and Parcel never stores or deletes them. Files that come from an **imported package** are kept by Parcel in its own storage, because they have no other home. When you remove such a file, Parcel keeps its copy until the removal is final — when you leave the workspace, quit Parcel, or make more than 20 removals — and then deletes it, unless another workspace (for example a duplicate) still uses it. The package you imported from is never changed. *Settings → Storage* shows how much Parcel stores and can remove files nothing uses (for example after a crash).
+
 ## Search
 
 Type in the search box (Ctrl+F). Plain words match names, descriptions, tags, metadata and note text. Operators: `kind:note`, `tag:finance`, `ext:pdf`. The type dropdown and tag list in the left panel filter further.

@@ -19,6 +19,7 @@ export const SHORTCUTS: ShortcutDef[] = [
   { keys: 'Ctrl+E', action: 'Export package', scope: 'Editor' },
   { keys: 'Ctrl+A', action: 'Select all', scope: 'Editor' },
   { keys: 'F2', action: 'Rename selected item', scope: 'Editor' },
+  { keys: 'Ctrl+Z', action: 'Undo the last removal from the workspace', scope: 'Editor' },
   { keys: 'Delete', action: 'Remove selected from workspace (originals untouched)', scope: 'Editor' },
   { keys: 'Enter', action: 'Open folder / edit note', scope: 'Editor' },
   { keys: 'Backspace', action: 'Go up one folder', scope: 'Editor' },

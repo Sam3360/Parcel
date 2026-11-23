@@ -218,10 +218,17 @@ impl Store {
                 "the replacement file's content differs from the collected file; confirm to accept the new content".into(),
             ));
         }
+        // The item now points at the user's own file, so it is no longer one that Parcel stores.
         self.conn.execute(
-            "UPDATE entries SET source_path=?2,size=?3,sha256=?4,source_mtime_ms=?5,modified_at=?6 WHERE id=?1",
+            "UPDATE entries SET source_path=?2,size=?3,sha256=?4,source_mtime_ms=?5,origin='source',modified_at=?6 WHERE id=?1",
             params![entry_id, new_path.to_string_lossy(), chk.size as i64, chk.sha256, intel::mtime_ms(new_path), now()],
         )?;
+        if e.origin == "imported" {
+            if let Some(old) = &e.source_path {
+                // Delete Parcel's now-unused stored copy, unless another item or a pending undo still uses it.
+                self.finalize_files(std::slice::from_ref(old));
+            }
+        }
         self.log(
             Some(&e.workspace_id),
             "source.relinked",

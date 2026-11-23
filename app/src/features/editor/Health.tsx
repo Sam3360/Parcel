@@ -3,7 +3,14 @@ import { Badge, Banner, Button, EmptyState, Loading } from '../../components/ui'
 import { StatusBadge } from './EntryViews';
 import { formatBytes, formatDateTime, plural } from '../../lib/format';
 import { useApp } from '../../hooks/app';
-import type { Diagnostic, DuplicateGroup, RevisionRow, SourceCheck, Workspace } from '../../lib/types';
+import type {
+  RemovalReceipt,
+  Diagnostic,
+  DuplicateGroup,
+  RevisionRow,
+  SourceCheck,
+  Workspace,
+} from '../../lib/types';
 
 export function Health({
   ws,
@@ -11,12 +18,14 @@ export function Health({
   onCheck,
   refresh,
   select,
+  onRemoved,
 }: {
   ws: Workspace;
   checks: SourceCheck[] | null;
   onCheck: (deep: boolean) => Promise<void>;
   refresh: () => void;
   select: (ids: string[]) => void;
+  onRemoved: (r: RemovalReceipt) => void;
 }) {
   const { api, confirm, reportError, toast } = useApp();
   const [dups, setDups] = useState<DuplicateGroup[] | null>(null);
@@ -116,9 +125,10 @@ export function Health({
     )
       return;
     try {
-      await api.deleteEntries(extras);
+      const receipt = await api.deleteEntries(extras);
       refresh();
       load();
+      onRemoved(receipt);
     } catch (e) {
       reportError(e);
     }

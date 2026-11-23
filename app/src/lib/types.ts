@@ -326,3 +326,34 @@ export interface DepRow {
   description: string;
   required: boolean;
 }
+
+export interface RemovalReceipt {
+  id: number;
+  workspace_id: string;
+  /** Items removed, including everything inside removed folders. */
+  removed: number;
+  /** Stored copies of imported files that are deleted once the removal becomes final. */
+  stored_files: number;
+}
+export interface RemovalSummary {
+  id: number;
+  label: string;
+  removed: number;
+}
+export interface UndoOutcome {
+  restored: number;
+  renamed: number;
+  relocated: number;
+}
+export interface StorageOutcome {
+  files_removed: number;
+  bytes_freed: number;
+}
+export interface StorageReport {
+  files: number;
+  bytes: number;
+  unused_files: number;
+  unused_bytes: number;
+  unused_examples: string[];
+  orphan_folders: number;
+}

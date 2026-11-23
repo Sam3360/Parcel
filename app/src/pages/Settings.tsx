@@ -3,6 +3,8 @@ import { useApp } from '../hooks/app';
 import { Button, Field } from '../components/ui';
 import { SHORTCUTS } from '../lib/shortcuts';
 import { describeError } from '../lib/api';
+import { formatBytes, plural } from '../lib/format';
+import type { StorageReport } from '../lib/types';
 
 const DEFAULT_LIMITS = {
   max_entries: 100000,
@@ -18,7 +20,49 @@ const toText = (l: Limits) =>
   Object.fromEntries(Object.entries(l).map(([k, v]) => [k, String(v)])) as Record<keyof Limits, string>;
 
 export function SettingsPage() {
-  const { api, prefs, setPref, reportError, toast, showShortcuts } = useApp();
+  const { api, prefs, setPref, reportError, toast, showShortcuts, confirm } = useApp();
+  const [storage, setStorage] = useState<StorageReport | 'error' | null>(null);
+  const [cleaning, setCleaning] = useState(false);
+  const loadStorage = () => {
+    setStorage(null);
+    api
+      .storageReport()
+      .then(setStorage)
+      .catch(() => setStorage('error'));
+  };
+  useEffect(loadStorage, [api]);
+  const cleanStorage = async () => {
+    if (!storage || storage === 'error') return;
+    const ok = await confirm({
+      title: 'Remove unused stored files?',
+      confirmLabel: 'Remove unused files',
+      danger: true,
+      message: (
+        <>
+          <p>
+            This deletes {plural(storage.unused_files, 'file')} ({formatBytes(storage.unused_bytes)})
+            {storage.orphan_folders > 0 ? ` and ${plural(storage.orphan_folders, 'leftover folder')}` : ''}{' '}
+            from Parcel's own storage. Nothing in a workspace refers to them.
+          </p>
+          <p className="muted">
+            Your original files, your exported packages, and everything your workspaces use are not touched.
+            Parcel checks again just before deleting.
+          </p>
+        </>
+      ),
+    });
+    if (!ok) return;
+    setCleaning(true);
+    try {
+      const r = await api.removeUnusedStorage();
+      toast(`Freed ${formatBytes(r.bytes_freed)}`, 'success');
+    } catch (e) {
+      reportError(e, 'Could not clean up storage');
+    } finally {
+      setCleaning(false);
+      loadStorage();
+    }
+  };
   const [info, setInfo] = useState<{
     version: string;
     data_dir: string;
@@ -164,6 +208,56 @@ export function SettingsPage() {
               Reset to defaults
             </Button>
           </div>
+        </section>
+
+        <section className="card card-pad stack section" aria-labelledby="s-store">
+          <h2 id="s-store">Storage</h2>
+          <p className="muted">
+            Items imported from a package are stored by Parcel so the workspace is self-contained. Files you
+            collect from your computer stay where they are and are never stored or deleted by Parcel.
+          </p>
+          {storage === null ? (
+            <p className="muted">Checking…</p>
+          ) : storage === 'error' ? (
+            <p className="muted">Storage information is not available.</p>
+          ) : (
+            <>
+              <dl className="kv" aria-label="Storage summary">
+                <dt>Imported files</dt>
+                <dd>
+                  {plural(storage.files, 'file')} ({formatBytes(storage.bytes)})
+                </dd>
+                <dt>Not used by anything</dt>
+                <dd>
+                  {plural(storage.unused_files, 'file')} ({formatBytes(storage.unused_bytes)})
+                  {storage.orphan_folders > 0 && `, ${plural(storage.orphan_folders, 'leftover folder')}`}
+                </dd>
+              </dl>
+              {storage.unused_examples.length > 0 && (
+                <ul
+                  className="mono small"
+                  aria-label="Examples of unused files"
+                  style={{ margin: 0, paddingLeft: 18 }}
+                >
+                  {storage.unused_examples.map((x) => (
+                    <li key={x}>{x}</li>
+                  ))}
+                </ul>
+              )}
+              <div className="row">
+                <Button
+                  className="danger"
+                  disabled={cleaning || (storage.unused_files === 0 && storage.orphan_folders === 0)}
+                  onClick={cleanStorage}
+                >
+                  Remove unused files…
+                </Button>
+                <Button variant="ghost" onClick={loadStorage}>
+                  Refresh
+                </Button>
+              </div>
+            </>
+          )}
         </section>
 
         <section className="card card-pad stack section" aria-labelledby="s-priv">

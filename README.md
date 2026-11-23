@@ -8,7 +8,7 @@ Parcel is an offline Windows desktop app (Tauri 2 + React + Rust) for collecting
 - Your original files are only ever **read**. Parcel never modifies, moves or deletes them.
 - Imported packages are treated as hostile input (path traversal, ZIP bombs, symlinks, malformed manifests are all rejected).
 
-> **Status:** v1.0.0 was released; its Windows build and installer were manually tested by the maintainer. **v1.1.0 is in preparation**: its changes have been tested on Linux only, and Windows validation (double-click / Open With, forwarding to a running instance, drag-and-drop outside the editor, Show in folder) is still to be done. See [Verification status](#verification-status), [CHANGELOG.md](CHANGELOG.md) and [Building on Windows](#building-on-windows).
+> **Status:** v1.0.0 and v1.1.0 are released. **v1.2.0 is in preparation** (undo for removals, cleanup of imported files). Its changes are covered by automated tests on Linux only; Windows builds are tested manually by the maintainer and the results are not recorded in this repository. See [Verification status](#verification-status), [CHANGELOG.md](CHANGELOG.md) and [Building on Windows](#building-on-windows).
 
 ## What works
 
@@ -16,7 +16,7 @@ Parcel is an offline Windows desktop app (Tauri 2 + React + Rust) for collecting
 |---|---|
 | Workspaces | Create (blank or from a template), rename, duplicate, trash/restore/permanently delete, recent list, everything auto-saved to SQLite. |
 | Collecting | Files, whole folders, multi-select, drag-and-drop from Explorer, notes, links, descriptions, tags, custom metadata. Files stay where they are; Parcel records path, size, SHA-256, timestamp. |
-| Organising | Folder tree, move (drag-and-drop or dialog), manual order, rename, multi-select, batch tag, remove-from-workspace (never deletes originals), list/grid views, sort, filter by type/tag, search across names, descriptions, tags, metadata and note text (`kind:` `tag:` `ext:` operators). |
+| Organising | Folder tree, move (drag-and-drop or dialog), manual order, rename, multi-select, batch tag, remove-from-workspace with **undo** (Ctrl+Z; never deletes originals), list/grid views, sort, filter by type/tag, search across names, descriptions, tags, metadata and note text (`kind:` `tag:` `ext:` operators). |
 | Notes & references | Markdown notes with live preview and autosave, workspace-level notes, categorised references, link entries. URLs are stored as text only and opened in your browser only after you confirm. |
 | Source intelligence | Detects **missing** and **changed** sources, lets you relink (validated by checksum) or explicitly accept a change; finds **duplicate content**; blocks export until problems are resolved — nothing is replaced silently. |
 | Packages | Export (streaming, atomic, verified after writing, cancellable, never overwrites without the OS save-dialog confirmation), open (from the app, by double-clicking a `.parcel`, via *Open with*, or by dropping it on the window), browse, search, preview (images, text, Markdown, JSON, CSV; PDF via the WebView viewer), verify, extract all/selected with conflict policy, import as workspace (extracted outside the database lock, created atomically; cancelled or failed imports leave nothing behind), import ZIP, compare two packages. |
@@ -24,6 +24,7 @@ Parcel is an offline Windows desktop app (Tauri 2 + React + Rust) for collecting
 | Revisions | Each export of a workspace is a numbered revision of the same package lineage. |
 | Dependencies | Declare entry→entry and external dependencies; cycles and dangling targets are diagnosed. |
 | CLI | `parcel inspect` `verify` `extract` `create` `validate` `compare` `import-zip`, using the same engine as the app. |
+| Storage | Files imported from a package are stored by Parcel; when you remove them and leave the workspace, Parcel deletes its stored copy (only if nothing else uses it). *Settings → Storage* shows how much is stored and removes leftovers on request. Files you collect from your computer are never stored or deleted by Parcel. |
 | Large collections | Windowed list view and package table (only visible rows are rendered), grid view loads in chunks, filterable item picker; *Show in folder* for source files, exports and extractions. |
 | UI | Light/dark/system themes, compact density, reduced motion, keyboard shortcuts (press `?`), context menus, focus-trapped dialogs, progress with cancellation. |
 

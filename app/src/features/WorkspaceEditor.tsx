@@ -7,6 +7,7 @@ import { describeError } from '../lib/api';
 import { isTyping } from '../lib/shortcuts';
 import { formatBytes, plural, uid } from '../lib/format';
 import type {
+  RemovalReceipt,
   DepRow,
   Entry,
   ExportProfile,
@@ -35,6 +36,7 @@ export function WorkspaceEditor({ id, onBack }: { id: string; onBack: () => void
   const [profiles, setProfiles] = useState<ExportProfile[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [checks, setChecks] = useState<SourceCheck[] | null>(null);
+  const [undoCount, setUndoCount] = useState(0);
 
   const [folder, setFolder] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -93,6 +95,51 @@ export function WorkspaceEditor({ id, onBack }: { id: string; onBack: () => void
       .then(setProfiles)
       .catch(() => {});
   }, [refresh, checkSources, api]);
+
+  const refreshUndo = useCallback(async () => {
+    try {
+      setUndoCount((await api.listRemovals(id)).length);
+    } catch {
+      setUndoCount(0);
+    }
+  }, [api, id]);
+
+  const undo = useCallback(async () => {
+    try {
+      const o = await api.undoRemove(id);
+      await refresh();
+      await refreshUndo();
+      const extra = [
+        o.renamed ? `${o.renamed} renamed because the name was taken` : '',
+        o.relocated ? `${o.relocated} placed at the top level because their folder is gone` : '',
+      ]
+        .filter(Boolean)
+        .join('; ');
+      toast(`Restored ${plural(o.restored, 'item')}${extra ? ` (${extra})` : ''}`, 'success');
+    } catch (e) {
+      reportError(e, 'Could not undo');
+      await refreshUndo();
+    }
+  }, [api, id, refresh, refreshUndo, toast, reportError]);
+
+  const announceRemoval = useCallback(
+    (r: RemovalReceipt) => {
+      void refreshUndo();
+      toast(`Removed ${plural(r.removed, 'item')} from the workspace`, 'info', {
+        label: 'Undo',
+        onClick: () => void undo(),
+      });
+    },
+    [refreshUndo, toast, undo],
+  );
+
+  // Leaving the workspace makes pending removals final: stored copies of removed imported files are freed.
+  useEffect(() => {
+    void refreshUndo();
+    return () => {
+      void api.finalizeRemovals(id).catch(() => {});
+    };
+  }, [api, id, refreshUndo]);
 
   const paths = useMemo(() => {
     const byId = new Map(entries.map((e) => [e.id, e]));
@@ -253,6 +300,19 @@ export function WorkspaceEditor({ id, onBack }: { id: string; onBack: () => void
     if (!list.length) return;
     if (prefs.confirm_remove !== 'false') {
       const folders = list.filter((e) => e.kind === 'folder').length;
+      const gone = new Set(list.map((e) => e.id));
+      for (let grew = true; grew;) {
+        grew = false;
+        for (const e of entries) {
+          if (e.parent_id && gone.has(e.parent_id) && !gone.has(e.id)) {
+            gone.add(e.id);
+            grew = true;
+          }
+        }
+      }
+      const importedCount = entries.filter(
+        (e) => gone.has(e.id) && e.kind === 'file' && e.origin === 'imported',
+      ).length;
       const ok = await confirm({
         title: `Remove ${plural(list.length, 'item')} from this workspace?`,
         confirmLabel: 'Remove',
@@ -264,16 +324,25 @@ export function WorkspaceEditor({ id, onBack }: { id: string; onBack: () => void
               the workspace{folders ? ', including everything inside the selected folders' : ''}.
             </p>
             <p className="muted">Your original files are not deleted or changed.</p>
+            {importedCount > 0 ? (
+              <p className="muted">
+                {plural(importedCount, 'file')} came from an imported package, so Parcel keeps its own copy.
+                Parcel deletes that copy when you leave this workspace; the package you imported from is not
+                changed. Until then you can undo (Ctrl+Z).
+              </p>
+            ) : (
+              <p className="muted">You can undo this (Ctrl+Z).</p>
+            )}
           </>
         ),
       });
       if (!ok) return;
     }
     try {
-      await api.deleteEntries(list.map((e) => e.id));
+      const receipt = await api.deleteEntries(list.map((e) => e.id));
       setSelected(new Set());
       await refresh();
-      toast(`Removed ${plural(list.length, 'item')} from the workspace`);
+      announceRemoval(receipt);
     } catch (e) {
       reportError(e);
     }
@@ -424,6 +493,9 @@ export function WorkspaceEditor({ id, onBack }: { id: string; onBack: () => void
       } else if (e.ctrlKey && k === 'e') {
         e.preventDefault();
         setDialog('export');
+      } else if (e.ctrlKey && !e.shiftKey && k === 'z' && !isTyping(e.target)) {
+        e.preventDefault();
+        void undo();
       } else if (!isTyping(e.target) && tab === 'items') {
         const idx = items.findIndex((x) => selected.has(x.id));
         if (e.ctrlKey && k === 'a') {
@@ -542,6 +614,11 @@ export function WorkspaceEditor({ id, onBack }: { id: string; onBack: () => void
         >
           Add
         </Button>
+        {undoCount > 0 && (
+          <Button icon="refresh" onClick={() => void undo()} title="Undo the last removal (Ctrl+Z)">
+            Undo remove{undoCount > 1 ? ` (${undoCount})` : ''}
+          </Button>
+        )}
         <div className="grow" style={{ maxWidth: 320, position: 'relative' }}>
           <input
             ref={searchRef}
@@ -766,6 +843,7 @@ export function WorkspaceEditor({ id, onBack }: { id: string; onBack: () => void
               checks={checks}
               onCheck={checkSources}
               refresh={refresh}
+              onRemoved={announceRemoval}
               select={(ids) => {
                 setSelected(new Set(ids));
                 setTab('items');

@@ -38,10 +38,21 @@ Out of scope for 1.x: authenticity of packages (no signatures), confidentiality 
 | Deleting files still in use | Cleanup only removes UUID-named folders that no workspace or entry references (substring match on the UUID, so path-format differences keep data), skips symlinks and in-flight imports. Covered by tests including duplicate workspaces. |
 | Partial collection after a failed add | Adding to a workspace is a single transaction. |
 
+## Added in 1.2.0
+
+| Threat | Control |
+|---|---|
+| Deleting a user's own files | Parcel only ever deletes files inside its managed storage (`<app data>/imported/<workspace uuid>/…`): a file is skipped unless its normalised path is below that root and its first component is a workspace UUID. Collected files (`origin = source`) are never candidates, even if a database row claimed otherwise (tested). |
+| Deleting a file another workspace still uses | A file is deleted only if no entry in any workspace — including duplicates and trashed workspaces — and no pending undo snapshot refers to it. |
+| Path spelling differences (Windows `\\?\` paths, case, slashes) causing a miss | Every comparison uses one normaliser; a mismatch can only keep files. The Windows forms are unit-tested as strings on Linux; real Windows behaviour is not verified by automated tests. |
+| Symlinks | Never followed, listed or deleted by cleanup or the storage scan. |
+| Stale UI data driving deletion | *Remove unused files* ignores the report shown and recomputes at deletion time; imports in progress are protected. |
+| Undo restoring something unsafe | Undo only re-inserts rows that were in the database moments earlier; no file content is created or read. |
+
 ## Known gaps
 
 * No package signing or encryption.
 * The fast source check trusts size + modification time; use *Deep check* to re-hash.
 * Reading a file that is being modified concurrently can produce a package containing the newer bytes; the user is warned after export.
 * Windows-specific filesystem edge cases (junctions, 8.3 names, alternate data streams) are not specifically tested. 1.1.0's Windows-dependent behaviour (file association launch, single-instance forwarding, revealing files in Explorer) has been tested on Linux only until validated on a Windows build.
-* Removing individual items from an imported workspace does not delete their stored files until the whole workspace is purged.
+* Undo history is in memory only: it is lost on restart and when leaving a workspace.

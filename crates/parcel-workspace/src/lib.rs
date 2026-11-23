@@ -4,6 +4,7 @@ pub mod error;
 pub mod import;
 pub mod launch;
 pub mod models;
+pub mod removal;
 pub mod store;
 pub mod templates;
 

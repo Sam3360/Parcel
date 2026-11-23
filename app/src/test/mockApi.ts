@@ -38,6 +38,12 @@ export interface MockState {
   verify: Record<string, T.IntegrityReport>;
   exported: { dest: string; accept: boolean }[];
   launch: string[];
+  /** Undo history per workspace (snapshots of removed entries), newest last. */
+  removals: Record<string, { id: number; label: string; entries: T.Entry[] }[]>;
+  /** Workspaces whose pending removals were finalized (stored copies freed). */
+  finalized: string[];
+  storage: T.StorageReport;
+  storageRemoved: number;
   revealed: { kind: 'source' | 'output'; value: string }[];
   dropHandlers: Set<(p: string[]) => void>;
   openHandlers: Set<() => void>;
@@ -125,6 +131,10 @@ export function createMockApi(
     exported: [],
     extracted: [],
     launch: [],
+    removals: {},
+    finalized: [],
+    storage: { files: 0, bytes: 0, unused_files: 0, unused_bytes: 0, unused_examples: [], orphan_folders: 0 },
+    storageRemoved: 0,
     revealed: [],
     dropHandlers: new Set(),
     openHandlers: new Set(),
@@ -332,8 +342,66 @@ export function createMockApi(
     },
     deleteEntries: async (ids) => {
       const all = new Set(ids.flatMap((i) => [i, ...descendants(i)]));
+      const removed = s.entries.filter((e) => all.has(e.id));
+      if (removed.length === 0) throw new MockError('not_found', 'entry not found');
+      const ws = removed[0].workspace_id;
+      const stack = (s.removals[ws] ??= []);
+      const rec = {
+        id: ++n,
+        label: ids.length === 1 ? removed.find((e) => e.id === ids[0])!.name : `${ids.length} items`,
+        entries: removed.map((e) => ({ ...e })),
+      };
+      stack.push(rec);
       s.entries = s.entries.filter((e) => !all.has(e.id));
-      return all.size;
+      return {
+        id: rec.id,
+        workspace_id: ws,
+        removed: removed.length,
+        stored_files: removed.filter((e) => e.kind === 'file' && e.origin === 'imported').length,
+      };
+    },
+    undoRemove: async (wid) => {
+      const stack = s.removals[wid] ?? [];
+      const rec = stack[stack.length - 1];
+      if (!rec) throw new MockError('invalid', 'there is nothing to undo');
+      if (ws(wid).deleted_at)
+        throw new MockError('invalid', 'restore the workspace from the trash before undoing');
+      const ids = new Set(rec.entries.map((e) => e.id));
+      const out = { restored: 0, renamed: 0, relocated: 0 };
+      for (const e of rec.entries) {
+        const row = { ...e };
+        if (!e.parent_id || !ids.has(e.parent_id)) {
+          if (e.parent_id && !s.entries.some((x) => x.id === e.parent_id && x.kind === 'folder')) {
+            row.parent_id = null;
+            out.relocated++;
+          }
+          const uname = unique(wid, row.parent_id, row.name);
+          if (uname !== row.name) {
+            row.name = uname;
+            out.renamed++;
+          }
+        }
+        s.entries.push(row);
+        out.restored++;
+      }
+      stack.pop();
+      return out;
+    },
+    listRemovals: async (wid) =>
+      [...(s.removals[wid] ?? [])]
+        .reverse()
+        .map((r) => ({ id: r.id, label: r.label, removed: r.entries.length })),
+    finalizeRemovals: async (wid) => {
+      s.finalized.push(wid);
+      delete s.removals[wid];
+      return { files_removed: 0, bytes_freed: 0 };
+    },
+    storageReport: async () => ({ ...s.storage }),
+    removeUnusedStorage: async () => {
+      s.storageRemoved++;
+      const freed = s.storage.unused_bytes;
+      s.storage = { ...s.storage, unused_files: 0, unused_bytes: 0, unused_examples: [], orphan_folders: 0 };
+      return { files_removed: 1, bytes_freed: freed };
     },
     batchTag: async (ids, add, remove) => {
       ids.forEach((i) => {

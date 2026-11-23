@@ -30,6 +30,11 @@ export const tauriApi: Api = {
   reorderEntries: (workspaceId, parentId, orderedIds) =>
     j('reorder_entries', { workspaceId, parentId, orderedIds }),
   deleteEntries: (ids) => j('delete_entries', { ids }),
+  undoRemove: (workspaceId) => j('undo_remove', { workspaceId }),
+  listRemovals: (workspaceId) => j('list_removals', { workspaceId }),
+  finalizeRemovals: (workspaceId) => j('finalize_removals', { workspaceId }),
+  storageReport: () => j('storage_report'),
+  removeUnusedStorage: () => j('remove_unused_storage'),
   batchTag: (ids, add, remove) => j('batch_tag', { ids, add, remove }),
   searchEntries: (workspaceId, query) => j('search_entries', { workspaceId, query }),
   workspaceStats: (workspaceId) => j('workspace_stats', { workspaceId }),

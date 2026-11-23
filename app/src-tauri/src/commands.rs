@@ -12,6 +12,7 @@ use parcel_workspace::import::StagedImport;
 use parcel_workspace::launch::strip_verbatim_prefix;
 use parcel_workspace::models::*;
 use parcel_workspace::ops::{AddReport, ExportOutcome, ExportRequest, SourceCheck};
+use parcel_workspace::removal::{RemovalReceipt, RemovalSummary, StorageOutcome, StorageReport, UndoOutcome};
 use parcel_workspace::templates::{ExportProfile, ProfileSpec, Template, TemplateSpec};
 use parcel_workspace::Store;
 use serde::Serialize;
@@ -142,8 +143,57 @@ pub fn reorder_entries(s: St, workspaceId: String, parentId: Option<String>, ord
     with_store(&s, |st| st.reorder(&workspaceId, parentId.as_deref(), &orderedIds))
 }
 #[tauri::command]
-pub fn delete_entries(s: St, ids: Vec<String>) -> IpcResult<usize> {
-    with_store(&s, |st| st.delete_entries(&ids))
+pub fn delete_entries(s: St, ids: Vec<String>) -> IpcResult<RemovalReceipt> {
+    // Undoable: the originals are never touched, and stored copies are only deleted once the removal is final.
+    with_store(&s, |st| st.remove_entries(&ids))
+}
+#[tauri::command]
+#[allow(non_snake_case)]
+pub fn undo_remove(s: St, workspaceId: String) -> IpcResult<UndoOutcome> {
+    with_store(&s, |st| st.undo_remove(&workspaceId))
+}
+#[tauri::command]
+#[allow(non_snake_case)]
+pub fn list_removals(s: St, workspaceId: String) -> IpcResult<Vec<RemovalSummary>> {
+    with_store(&s, |st| Ok(st.list_removals(&workspaceId)))
+}
+
+/// Make pending removals in a workspace final and delete the stored copies nothing uses any more.
+#[tauri::command]
+#[allow(non_snake_case)]
+pub async fn finalize_removals(s: St<'_>, workspaceId: String) -> IpcResult<StorageOutcome> {
+    let store = s.store.clone();
+    tauri::async_runtime::spawn_blocking(move || store.lock().map(|g| g.finalize_removals(&workspaceId)).map_err(|_| ()))
+        .await
+        .map_err(|e| IpcError::invalid(e.to_string()))?
+        .map_err(|_| IpcError::invalid("internal lock poisoned"))
+}
+
+/// How much of Parcel's imported-file storage is used, and what nothing references (read-only).
+#[tauri::command]
+pub async fn storage_report(s: St<'_>) -> IpcResult<StorageReport> {
+    let store = s.store.clone();
+    let res = tauri::async_runtime::spawn_blocking(move || -> Result<StorageReport, parcel_workspace::WsError> {
+        let g = store.lock().map_err(|_| parcel_workspace::WsError::Invalid("internal lock poisoned".into()))?;
+        g.scan_managed_storage()
+    })
+    .await
+    .map_err(|e| IpcError::invalid(e.to_string()))?;
+    Ok(res?)
+}
+
+/// Delete stored files nothing references (recomputed now), keeping anything an import in progress or a pending undo needs.
+#[tauri::command]
+pub async fn remove_unused_storage(s: St<'_>) -> IpcResult<StorageOutcome> {
+    let store = s.store.clone();
+    let protected = s.protected_import_ids();
+    let res = tauri::async_runtime::spawn_blocking(move || -> Result<StorageOutcome, parcel_workspace::WsError> {
+        let g = store.lock().map_err(|_| parcel_workspace::WsError::Invalid("internal lock poisoned".into()))?;
+        g.remove_unused_storage(&protected)
+    })
+    .await
+    .map_err(|e| IpcError::invalid(e.to_string()))?;
+    Ok(res?)
 }
 #[tauri::command]
 pub fn batch_tag(s: St, ids: Vec<String>, add: Vec<String>, remove: Vec<String>) -> IpcResult<()> {

@@ -2626,7 +2626,7 @@ dependencies = [
 
 [[package]]
 name = "parcel-app"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "base64 0.22.1",
  "parcel-core",
@@ -2643,7 +2643,7 @@ dependencies = [
 
 [[package]]
 name = "parcel-cli"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "chrono",
  "parcel-core",
@@ -2656,7 +2656,7 @@ dependencies = [
 
 [[package]]
 name = "parcel-core"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "chrono",
  "hex",
@@ -2672,7 +2672,7 @@ dependencies = [
 
 [[package]]
 name = "parcel-workspace"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "chrono",
  "parcel-core",

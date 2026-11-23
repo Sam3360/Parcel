@@ -1,5 +1,45 @@
 # Changelog
 
+## 1.2.0 — unreleased
+
+Backward-compatible release. **Package format stays 1.0 and the database schema stays v1** (no migration; undo history lives in memory only). Packages and databases move freely between 1.0, 1.1 and 1.2.
+
+### Added
+- **Undo for "remove from workspace".** Ctrl+Z, the *Undo* button on the removal toast, or *Undo remove* in the toolbar. Restores the items, everything inside removed folders, and their links to references, dependencies and attached notes — exactly (same ids, order, tags, metadata, timestamps). If the original folder is gone the item returns to the top level; if its name was taken it comes back with a number. Up to 20 removals deep; the history lives while the app runs and is cleared when you leave the workspace. Works for removals from the Health tab ("remove extra copies") too.
+- **Storage cleanup for imported workspaces.** Removing a file that came from an imported package now frees Parcel's stored copy once the removal is final (leaving the workspace, quitting, or more than 20 removals) — never earlier, so undo always works — and only if nothing else uses it (duplicates, other workspaces, pending undo). Previously stored copies stayed until the whole workspace was purged.
+- **Settings → Storage:** shows how much imported-file storage Parcel holds and what nothing uses (e.g. after a crash), and removes it on request. Deletion is recomputed at the moment you confirm.
+- The removal confirmation now says plainly when selected files are Parcel-stored copies (the imported package itself is never changed) and mentions undo.
+
+### Changed
+- Relinking an imported item to your own file now marks it as your file (it previously kept the "imported" label) and frees the stored copy if unused.
+- The removal toast has an *Undo* action; toasts with actions stay up longer.
+
+### Safety (file deletion is the riskiest thing Parcel does, so)
+- Parcel only deletes files **inside its own managed storage**, in a workspace's UUID folder, that no entry in any workspace and no pending undo references. Your collected files are never candidates, even if a database row claimed otherwise.
+- All path comparisons go through one normaliser (Windows `\\?\` prefix, slashes, case); a spelling difference can only cause a file to be **kept**.
+- Symlinks are never followed, listed or deleted.
+- Tests were mutation-checked: removing each of the reference check, root guard, undo pinning and case-folding makes specific tests fail. (The first run exposed that the root guard was not independently tested; a test was added.)
+
+### Fixed
+- Found by tests while building undo: restoring must re-link references that survived the removal.
+- Removed the stray `parcel-1.1.0.patch` that had been committed to the repository root.
+
+### Verification (Linux x86-64 container, Rust 1.91, Node 22)
+| Check | Result |
+|---|---|
+| `cargo fmt --all -- --check` | pass |
+| `cargo clippy --workspace --all-targets -- -D warnings` | pass |
+| `cargo test --workspace` | 91 passed, 0 failed (23 new in `parcel-workspace`) |
+| `npm run format:check`, `lint`, `typecheck` | pass |
+| `npm test` | 114 passed, 0 failed (16 new) |
+| `npm run build` | pass |
+| **Windows:** Ctrl+Z / toolbar / toast Undo, storage freed after leaving a workspace and on quit, Settings → Storage, behaviour with real `\\?\` stored paths, installer | **NOT TESTED by the author — validate on a Windows build** |
+
+### Known limitations
+- Undo history is in memory: lost on restart, on leaving the workspace, and on app exit. Stored copies of removed files are deleted at that point.
+- If the app is killed (crash, power loss) before pending removals are finalized, their stored copies remain until you use *Settings → Storage → Remove unused files*.
+- The Windows path forms the normaliser handles are unit-tested as strings on Linux; real Windows file behaviour is untested here.
+
 ## 1.1.0 — unreleased
 
 Backward-compatible release: **package format stays 1.0 and the database schema stays v1.** Packages written by 1.1.0 open in 1.0.0 and vice versa; an existing database needs no migration.

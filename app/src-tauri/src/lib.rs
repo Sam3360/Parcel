@@ -51,6 +51,10 @@ pub fn run() {
             state.push_open(package_paths_from_args(std::env::args(), std::env::current_dir().ok().as_deref(), true));
             // Reclaim space from imports that were interrupted or whose workspaces are gone.
             commands::cleanup_managed(&state);
+            // Parcel's own storage for imported files; file cleanup never acts outside it.
+            if let Ok(g) = state.store.lock() {
+                g.set_managed_root(Some(state.managed_dir()));
+            }
             app.manage(state);
             Ok(())
         })
@@ -115,6 +119,11 @@ pub fn run() {
             commands::clear_recent_packages,
             commands::list_revisions,
             commands::take_launch_packages,
+            commands::undo_remove,
+            commands::list_removals,
+            commands::finalize_removals,
+            commands::storage_report,
+            commands::remove_unused_storage,
             commands::reveal_source,
             commands::reveal_output,
             commands::get_prefs,
@@ -122,8 +131,18 @@ pub fn run() {
             commands::cancel_job,
             commands::app_info,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Parcel");
+        .build(tauri::generate_context!())
+        .expect("error while building Parcel")
+        .run(|app, event| {
+            // On quit, pending removals become final so deleted items' stored copies are freed.
+            if let tauri::RunEvent::Exit = event {
+                if let Some(state) = app.try_state::<AppState>() {
+                    if let Ok(g) = state.store.lock() {
+                        g.finalize_all_removals();
+                    }
+                }
+            }
+        });
 }
 
 fn chrono_stamp() -> u64 {
